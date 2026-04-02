@@ -11,18 +11,22 @@
         href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="output.css">
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="/vendor/@phosphor-icons/web/src/regular/style.css">
+    <link rel="stylesheet" href="/vendor/@phosphor-icons/web/src/thin/style.css">
+    <link rel="stylesheet" href="/vendor/@phosphor-icons/web/src/light/style.css">
+    <link rel="stylesheet" href="/vendor/@phosphor-icons/web/src/bold/style.css">
+    <link rel="stylesheet" href="/vendor/@phosphor-icons/web/src/fill/style.css">
+    <link rel="stylesheet" href="/vendor/@phosphor-icons/web/src/duotone/style.css">
+    <script src="/local-vendor/marked/marked.min.js"></script>
 
     <!-- Code Highlighting -->
-    <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+    <link rel="stylesheet" href="/local-vendor/highlight.js/styles/github-dark.min.css">
+    <script src="/local-vendor/highlight.js/highlight.min.js"></script>
 
     <!-- Math Formulas (KaTeX) -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <link rel="stylesheet" href="/vendor/katex/dist/katex.min.css">
+    <script src="/vendor/katex/dist/katex.min.js"></script>
+    <script src="/vendor/katex/dist/contrib/auto-render.min.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 
@@ -90,6 +94,11 @@
                 <span>Proceed</span> <i class="ph ph-arrow-right"></i>
             </button>
         </div>
+        <!-- Shutdown Button (fixed to viewport bottom-left) -->
+        <button id="shutdownServerBtn" style="position:fixed; bottom:24px; left:24px; z-index:200;"
+            class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors font-medium text-sm">
+            <i class="ph ph-power text-lg"></i> Stop Server
+        </button>
     </div>
 
     <!-- Main App Container -->
@@ -124,7 +133,7 @@
             <div class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4 space-y-0.5" id="chatList"></div>
 
             <div class="px-4 py-3 border-t border-white/[0.06] flex items-center justify-between">
-                <span class="text-[11px] text-white/25 font-medium tracking-wide uppercase">v0.1.0-a</span>
+                <span class="text-[11px] text-white/25 font-medium tracking-wide uppercase">v0.1.1-a</span>
                 <button id="settingsBtn" class="text-white/30 hover:text-white/70 transition-colors" title="Settings">
                     <i class="ph ph-gear text-base"></i>
                 </button>
@@ -151,21 +160,18 @@
                 </div>
 
                 <div class="flex items-center gap-3">
+                    <!-- Temporary Chat Toggle -->
+                    <button id="tempChatBtn" title="Toggle Temporary Chat — messages won't be saved"
+                        class="temp-chat-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-white/40 bg-white/5 hover:bg-white/10 transition-all text-xs font-medium">
+                        <i class="ph ph-ghost text-sm"></i>
+                        <span class="header-label">Temporary Chat</span>
+                    </button>
                     <!-- Unload Model / Leave Session -->
                     <button id="unloadModelBtn"
                         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/20 text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors text-xs font-medium">
-                        <i class="ph ph-sign-out"></i> Stop Session
+                        <i class="ph ph-sign-out"></i>
+                        <span class="header-label">Stop Session</span>
                     </button>
-                    <!-- Thinking toggle switch -->
-                    <label class="thinking-switch" id="thinkingSwitch" title="Toggle Extended Thinking">
-                        <input type="checkbox" id="thinkingCheckbox">
-                        <div class="switch-track">
-                            <div class="switch-thumb">
-                                <i class="ph ph-brain text-[9px]"></i>
-                            </div>
-                        </div>
-                        <span class="switch-label text-xs text-white/50">Think</span>
-                    </label>
                 </div>
             </header>
 
@@ -180,8 +186,8 @@
                         <i class="ph ph-sparkle text-3xl text-indigo-400"></i>
                     </div>
                     <h2 class="text-2xl font-semibold text-white/90 mb-2 tracking-tight">How can I help?</h2>
-                    <p class="text-white/40 text-sm leading-relaxed">Ask anything. Chat with your local Ollama<br>models
-                        or Claude Code, right here.</p>
+                    <p class="text-white/40 text-sm leading-relaxed">Ask anything. Chat with your local
+                        Ollama<br>models, right here.</p>
                 </div>
 
                 <div id="messagesContainer" class="max-w-3xl mx-auto flex flex-col gap-6 pb-2"></div>
@@ -214,6 +220,16 @@
                             <label for="fileUpload" class="icon-btn cursor-pointer" title="Attach file">
                                 <i class="ph ph-paperclip text-base"></i>
                                 <input type="file" id="fileUpload" class="hidden" multiple>
+                            </label>
+                            <!-- Thinking toggle switch -->
+                            <label class="thinking-switch ml-1" id="thinkingSwitch" title="Toggle Extended Thinking">
+                                <input type="checkbox" id="thinkingCheckbox">
+                                <div class="switch-track">
+                                    <div class="switch-thumb">
+                                        <i class="ph ph-brain text-[9px]"></i>
+                                    </div>
+                                </div>
+                                <span class="switch-label text-xs text-white/50">Think</span>
                             </label>
                         </div>
                         <div class="flex items-center gap-2">
@@ -317,6 +333,7 @@
             </div>
         </div>
     </div>
+
 
     <script src="app.js"></script>
 </body>

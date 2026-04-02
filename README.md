@@ -12,21 +12,26 @@
 
 ## 🖼️ Overview
 
-Currently in alpha state, **Starbox UI** is a premium-designed web interface that lets you chat with any model installed through **Ollama** directly on your machine, with zero data sent to the cloud. It features real-time response streaming, and a fully-featured conversation manager. (NOTE: Performance depends on the model and your device.)
+Currently in alpha state, **Starbox UI** is a premium-designed web interface that lets you chat with any model installed through **Ollama** directly on your machine, with zero data sent to the cloud. It features real-time response streaming, a fully-featured conversation manager, and a fully offline-capable UI served locally.
+
+> ⚠️ **Performance depends on the model and your device's hardware.**
 
 ---
 
 ## 🎨 Features
 
+- **Works Fully Offline** — All UI libraries (icons, markdown, syntax highlighting, math) are bundled locally. No internet required after installation.
 - **Thinking Mode** — Real-time visualization of the model's thought process, with collapsible thinking blocks and infinite-loop protection (60s wall-clock cap + 45s inactivity watchdog).
+- **Temporary Chat** — Enable ghost mode to chat without saving anything to disk. The conversation is wiped the moment you navigate away or refresh.
 - **Real-time Streaming** — Responses appear token-by-token using WebSockets for a fluid, ChatGPT-like experience.
 - **Instant Chat Search** — Filter your entire conversation history in real time from the sidebar.
 - **Drag-and-Drop Reordering** — Reorganize your chat list with native HTML5 drag-and-drop.
-- **File Upload** — Attach images and text documents to conversations. (Currently doesn't work, will be fixed in the future)
+- **File Upload** — Attach images and text documents to conversations. *(Currently not working — will be fixed in the future.)*
 - **Persistent History** — All conversations are saved locally to a `data/state.json` file on the server.
-- **Settings Panel** — Centralized settings menu with a safe "Clear All History" feature (includes a confirmation prompt).
+- **Settings Panel** — Centralized settings menu with a safe "Clear All History" feature.
 - **Auto Model Detection** — Automatically fetches all locally available Ollama models on startup via the Ollama REST API, no manual configuration needed.
-- **Stop Session** — Safely unload the current model from memory and return to the setup screen at any time. ***(Make sure you do this before closing the server, or the model will remain in memory.)***
+- **Stop Session** — Safely unload the current model from memory and return to the setup screen at any time. ***(Do this before closing the server to free up VRAM.)***
+- **Multi-device Access** — Access Starbox UI from your phone or tablet via your local network.
 
 ---
 
@@ -52,15 +57,16 @@ cd starbox-ui
 npm install
 ```
 
-**3. Install Ollama Models:**
+**3. Pull an Ollama model** (if you haven't already):
 ```bash
 ollama pull <model_name>
 ```
 
-**4. Start Ollama** (if it is not already running on startup):
-```bash
-ollama serve
-```
+**4. Start Ollama:**
+
+> **On Windows**, the recommended way is to launch the **Ollama desktop app** and keep it minimized in the system tray. This ensures GPU drivers and model paths are configured correctly.
+>
+> Running `ollama serve` in a terminal may work on Linux/macOS, but on Windows it can fail to detect models if environment variables are not set up manually.
 
 **5. Launch Starbox UI:**
 ```bash
@@ -76,11 +82,11 @@ http://localhost:4000
 > - The server defaults to port **4000**.
 > - If port 4000 is taken by another application, it automatically tries the next port up to **5000**.
 
-**7. Accessing from other devices**:
-> You can access the same interface on your other devices if its connected to the same network by replacing `localhost` with your main computer's IP address. 
+**7. Accessing from other devices on the same network:**
 ```
-(e.g. `http://IP_ADDRESS:4000`).
+http://YOUR_LOCAL_IP:4000
 ```
+> Replace `YOUR_LOCAL_IP` with your computer's local IP address (e.g., `192.168.1.x`). You can find it by running `ipconfig` (Windows) or `ifconfig` (macOS/Linux).
 
 ---
 
@@ -91,10 +97,10 @@ http://localhost:4000
 | **Runtime** | [Node.js](https://nodejs.org/) |
 | **Backend** | [Express.js](https://expressjs.com/), [WebSockets](https://github.com/websockets/ws), [Multer](https://github.com/expressjs/multer) |
 | **Frontend** | Vanilla JavaScript (ES6+), [Tailwind CSS](https://tailwindcss.com/) |
-| **UI Icons** | [Phosphor Icons](https://phosphoricons.com/) |
-| **Markdown** | [Marked.js](https://marked.js.org/) |
-| **Math Renderer** | [KaTeX](https://katex.org/) |
-| **Code Highlighting** | [Highlight.js](https://highlightjs.org/) |
+| **UI Icons** | [Phosphor Icons](https://phosphoricons.com/) *(bundled locally)* |
+| **Markdown** | [Marked.js](https://marked.js.org/) *(bundled locally)* |
+| **Math Renderer** | [KaTeX](https://katex.org/) *(bundled locally)* |
+| **Code Highlighting** | [Highlight.js](https://highlightjs.org/) *(bundled locally)* |
 | **AI Backend** | [Ollama](https://ollama.com/) (local) |
 
 ---
@@ -102,16 +108,22 @@ http://localhost:4000
 ## 📁 Project Structure
 
 ```
-starbox-ai/
+starbox-ui/
 ├── public/
-│   ├── index.html      # Main UI shell
-│   ├── app.js          # Frontend logic (WebSocket, chat, state)
-│   └── styles.css      # Global styles & glassmorphism theme
+│   ├── index.html          # Main UI shell
+│   ├── app.js              # Frontend logic (WebSocket, chat, state)
+│   ├── styles.css          # Global styles & glassmorphism theme
+│   ├── input.css           # Tailwind CSS entry point
+│   ├── output.css          # Compiled Tailwind CSS (auto-generated)
+│   └── local-vendor/       # Locally bundled JS/CSS libraries (offline support)
+│       ├── highlight.js/
+│       └── marked/
 ├── data/
-│   └── state.json      # Persisted server-side state (chats, settings)
-├── uploads/            # Temporary file upload storage
-├── server.js           # Express + WebSocket backend
+│   └── state.json          # Persisted server-side state (chats, settings)
+├── uploads/                # Temporary file upload storage
+├── server.js               # Express + WebSocket backend
 ├── package.json
+├── tailwind.config.js
 ├── LICENSE
 └── README.md
 ```
@@ -120,9 +132,10 @@ starbox-ai/
 
 ## ⚠️ Important Notes
 
-- All your conversations are stored **locally** in `data/state.json`. There is no cloud sync.
-- The `uploads/` and `data/` directories are created automatically on first run.
-- Make sure the **model is installed** on your local machine before launching the server, or the model list will appear empty.
+- All conversations are stored **locally** in `data/state.json`. There is no cloud sync.
+- The `uploads/` and `data/` directories are created automatically on first run and are excluded from Git.
+- **Temporary Chat** mode is session-only — nothing is saved to disk while it's active. Refreshing the page will clear the conversation.
+- Make sure the **Ollama app is running** before launching Starbox UI, or the model list will appear empty.
 
 ---
 

@@ -32,9 +32,19 @@ const clearProceedBtn = document.getElementById('clearProceedBtn');
 const stopSessionConfirmModal = document.getElementById('stopSessionConfirmModal');
 const stopSessionCancelBtn = document.getElementById('stopSessionCancelBtn');
 const stopSessionProceedBtn = document.getElementById('stopSessionProceedBtn');
+const shutdownServerBtn = document.getElementById('shutdownServerBtn');
+const tempChatBtn = document.getElementById('tempChatBtn');
 
 let chatSearchQuery = '';
 let draggedChatId = null;
+let isTemporaryChat = false; // When true, active chat is not persisted to backend
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.chat-actions')) {
+        document.querySelectorAll('.chat-options-menu').forEach(m => m.classList.add('hidden'));
+        document.querySelectorAll('.chat-actions').forEach(a => a.style.opacity = '');
+    }
+});
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 // ── CustomDropdown ────────────────────────────────────────────────────────────
@@ -185,11 +195,21 @@ async function fetchGlobalState() {
 async function updateState(newState) {
     globalState = { ...globalState, ...newState };
     try {
+        // Strip temporary chats from backend persistence
+        const persistChats = (globalState.chats || []).filter(c => !c.isTemporary);
+        const persistActiveChatId = persistChats.find(c => c.id === globalState.activeChatId)
+            ? globalState.activeChatId
+            : (persistChats[0]?.id || null);
+
+        const persistPayload = { ...newState };
+        if ('chats' in newState) persistPayload.chats = persistChats;
+        if ('activeChatId' in newState) persistPayload.activeChatId = persistActiveChatId;
+
         const port = window.location.port || '4000';
         await fetch(`http://${window.location.hostname}:${port}/api/state`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newState)
+            body: JSON.stringify(persistPayload)
         });
     } catch (e) { console.error(e); }
 }
@@ -223,6 +243,28 @@ function applyStateToUI() {
 
 // ── Event listeners ───────────────────────────────────────────────────────────
 function setupEventListeners() {
+    if (shutdownServerBtn) {
+        shutdownServerBtn.addEventListener('click', async () => {
+            shutdownServerBtn.innerHTML = '<i class="ph ph-spinner animate-spin text-lg"></i> Stopping...';
+            shutdownServerBtn.disabled = true;
+            try {
+                const port = window.location.port || '4000';
+                await fetch(`http://${window.location.hostname}:${port}/api/shutdown`, { method: 'POST' });
+                shutdownServerBtn.innerHTML = '<i class="ph ph-check-circle text-lg"></i> Server Stopped';
+                shutdownServerBtn.classList.replace('text-red-400', 'text-green-400');
+                shutdownServerBtn.classList.replace('bg-red-500/10', 'bg-green-500/10');
+                shutdownServerBtn.classList.replace('border-red-500/20', 'border-green-500/20');
+                showToast('Server has been shut down. You can close this window.', 'info');
+            } catch (e) {
+                shutdownServerBtn.innerHTML = '<i class="ph ph-check-circle text-lg"></i> Server Stopped';
+                shutdownServerBtn.classList.replace('text-red-400', 'text-green-400');
+                shutdownServerBtn.classList.replace('bg-red-500/10', 'bg-green-500/10');
+                shutdownServerBtn.classList.replace('border-red-500/20', 'border-green-500/20');
+                showToast('Server has been shut down. You can close this window.', 'info');
+            }
+        });
+    }
+
     if (promptInput) {
         promptInput.addEventListener('input', () => {
             promptInput.style.height = 'auto';
@@ -248,7 +290,24 @@ function setupEventListeners() {
 
     if (stopBtn) stopBtn.addEventListener('click', stopGeneration);
     if (fileUpload) fileUpload.addEventListener('change', handleFileUpload);
-    if (newChatBtn) newChatBtn.addEventListener('click', () => createNewChat(false));
+    if (newChatBtn) newChatBtn.addEventListener('click', () => {
+        isTemporaryChat = false;
+        updateTempChatBtn();
+        createNewChat(false);
+    });
+
+    if (tempChatBtn) {
+        tempChatBtn.addEventListener('click', () => {
+            // Cannot toggle temporary mode once a chat has started
+            const current = globalState.chats.find(c => c.id === globalState.activeChatId);
+            if (current && current.messages.length > 0) return;
+
+            isTemporaryChat = !isTemporaryChat;
+            // Mark the current (empty) chat as temporary
+            if (current) current.isTemporary = isTemporaryChat;
+            updateTempChatBtn();
+        });
+    }
 
     if (chatSearchBox) chatSearchBox.addEventListener('input', e => {
         chatSearchQuery = e.target.value.toLowerCase().trim();
@@ -498,6 +557,24 @@ function showToast(message, type = 'info') {
 
 // ── Chat management ───────────────────────────────────────────────────────────
 /**
+ * Sync the Temp Chat button appearance based on state.
+ * - active: temp mode is on
+ * - locked: chat already has messages, can't toggle
+ */
+function updateTempChatBtn() {
+    if (!tempChatBtn) return;
+    const current = globalState.chats.find(c => c.id === globalState.activeChatId);
+    const hasMessages = current && current.messages.length > 0;
+    tempChatBtn.classList.toggle('active', isTemporaryChat);
+    tempChatBtn.classList.toggle('locked', hasMessages);
+    tempChatBtn.title = hasMessages
+        ? 'Temp Chat can only be toggled on a fresh chat'
+        : isTemporaryChat
+            ? 'Temporary Chat is ON — messages won\'t be saved. Click to disable.'
+            : 'Toggle Temporary Chat — messages won\'t be saved';
+}
+
+/**
  * @param {boolean} silent - if true, skip "empty chat" guard (used on boot)
  */
 function createNewChat(silent = false) {
@@ -514,6 +591,7 @@ function createNewChat(silent = false) {
         id: Date.now().toString(),
         title: 'New Conversation',
         messages: [],
+        isTemporary: isTemporaryChat,
         updatedAt: Date.now()
     };
     globalState.chats.unshift(newChat);
@@ -533,27 +611,107 @@ function renderChatList() {
     chatList.innerHTML = '';
 
     const filteredChats = globalState.chats.filter(chat =>
+        !chat.isTemporary &&
         chat.title.toLowerCase().includes(chatSearchQuery) &&
         chat.messages.length > 0
     );
 
     filteredChats.forEach((chat, index) => {
         const btn = document.createElement('button');
-        btn.className = 'chat-item' + (chat.id === globalState.activeChatId ? ' active' : '');
+        btn.className = 'chat-item group' + (chat.id === globalState.activeChatId ? ' active' : '');
         btn.draggable = true;
 
         btn.innerHTML = `
             <div class="flex items-center gap-2 min-w-0 flex-1 pointer-events-none">
                 <i class="ph ph-chat-teardrop text-sm flex-shrink-0"></i>
-                <span class="truncate">${chat.title}</span>
+                <span class="truncate chat-title-text">${escapeHtml(chat.title)}</span>
             </div>
-            <button class="delete-chat flex-shrink-0 text-white/20 hover:text-red-400 transition opacity-0 group-hover:opacity-100 p-0.5 rounded">
-                <i class="ph ph-trash text-sm"></i>
-            </button>`;
+            <div class="chat-actions relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="options-trigger flex-shrink-0 flex items-center justify-center w-6 h-6 text-white/40 hover:text-white transition" title="Options">
+                    <i class="ph ph-dots-three-outline-vertical text-[18px]"></i>
+                </button>
+                <div class="chat-options-menu glass-dropdown hidden shadow-2xl overflow-hidden" style="left: auto; right: 0; top: calc(100% + 4px); min-width: 120px; z-index: 50; padding: 4px;">
+                    <div class="dropdown-option rename-chat text-white/80 hover:text-white mb-0.5">
+                        <i class="ph ph-pencil-simple text-sm"></i> Rename
+                    </div>
+                    <div class="dropdown-option delete-chat !text-red-500 hover:!text-red-400 hover:!bg-red-500/10">
+                        <i class="ph ph-trash text-sm"></i> Delete
+                    </div>
+                </div>
+            </div>`;
+
+        const optionsTrigger = btn.querySelector('.options-trigger');
+        const optionsMenu = btn.querySelector('.chat-options-menu');
+        const actionsDiv = btn.querySelector('.chat-actions');
+
+        optionsTrigger.addEventListener('click', e => {
+            e.stopPropagation();
+            const isHidden = optionsMenu.classList.contains('hidden');
+            
+            // Hide all other menus
+            document.querySelectorAll('.chat-options-menu').forEach(menu => menu.classList.add('hidden'));
+            document.querySelectorAll('.chat-actions').forEach(act => {
+                act.style.opacity = ''; // Remove inline opacity
+            });
+            
+            if (isHidden) {
+                optionsMenu.classList.remove('hidden');
+                actionsDiv.style.opacity = '1'; // Force actions to stay visible
+            }
+            
+            // Keep the chat item from starting a drag when clicking options
+            btn.draggable = false;
+        });
 
         btn.querySelector('.delete-chat').addEventListener('click', e => {
             e.stopPropagation();
+            optionsMenu.classList.add('hidden');
+            actionsDiv.style.opacity = '';
             deleteChat(chat.id);
+        });
+
+        btn.querySelector('.rename-chat').addEventListener('click', e => {
+            e.stopPropagation();
+            optionsMenu.classList.add('hidden');
+            actionsDiv.style.opacity = '';
+            
+            const titleContainer = btn.querySelector('.chat-title-text');
+            const currentTitle = chat.title;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentTitle;
+            input.className = 'w-full bg-black/20 text-white/90 text-[13px] px-1 py-0.5 rounded border border-white/20 focus:outline-none focus:border-indigo-400 pointer-events-auto';
+            
+            actionsDiv.style.display = 'none';
+
+            const save = () => {
+                const newTitle = input.value.trim();
+                if (input.dataset.saved) return;
+                input.dataset.saved = 'true';
+
+                if (newTitle && newTitle !== currentTitle) {
+                    chat.title = newTitle;
+                    saveChats();
+                }
+                renderChatList();
+            };
+
+            input.addEventListener('blur', save);
+            input.addEventListener('keydown', e => {
+                e.stopPropagation();
+                if (e.key === 'Enter') save();
+                if (e.key === 'Escape') {
+                    input.dataset.saved = 'true';
+                    input.value = currentTitle;
+                    save();
+                }
+            });
+            input.addEventListener('click', e => e.stopPropagation());
+
+            titleContainer.replaceWith(input);
+            input.focus();
+            input.select();
+            btn.draggable = false;
         });
 
         btn.addEventListener('click', () => {
@@ -608,8 +766,7 @@ function renderChatList() {
             }
         });
 
-        btn.addEventListener('mouseenter', () => btn.querySelector('.delete-chat').style.opacity = '1');
-        btn.addEventListener('mouseleave', () => btn.querySelector('.delete-chat').style.opacity = '0');
+        // Chat actions hover state handled by CSS .group-hover
 
         chatList.appendChild(btn);
     });
@@ -632,6 +789,10 @@ function deleteChat(id) {
 function loadChat(id) {
     const chat = globalState.chats.find(c => c.id === id);
     if (!chat) return;
+
+    // Sync temp mode state from the chat object
+    isTemporaryChat = !!chat.isTemporary;
+    updateTempChatBtn();
 
     messagesContainer.innerHTML = '';
     emptyState.classList.toggle('hidden', chat.messages.length > 0);
@@ -906,11 +1067,24 @@ function connectWebSocket() {
         const data = JSON.parse(event.data);
 
         if (data.type === 'state_update') {
-            const prevState = globalState.sessionActive;
+            const prevSessionActive = globalState.sessionActive;
+
+            // If we have a temporary chat active, the backend doesn't know about it.
+            // Preserve our local chats/activeChatId so the temp chat isn't wiped.
+            const preserveLocalChats = isTemporaryChat;
+            const localChats = globalState.chats;
+            const localActiveChatId = globalState.activeChatId;
+
             globalState = { ...globalState, ...data.state };
+
+            if (preserveLocalChats) {
+                globalState.chats = localChats;
+                globalState.activeChatId = localActiveChatId;
+            }
+
             if (!isGenerating) {
                 renderChatList();
-                if (prevState !== globalState.sessionActive) applyStateToUI();
+                if (prevSessionActive !== globalState.sessionActive) applyStateToUI();
 
                 if (globalState.activeChatId && !globalState.chats.find(c => c.id === globalState.activeChatId)) {
                     // Chat got deleted globally

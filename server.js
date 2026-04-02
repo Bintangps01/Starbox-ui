@@ -12,8 +12,13 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ limit: '5mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/vendor/@phosphor-icons/web', express.static(path.join(__dirname, 'node_modules', '@phosphor-icons', 'web')));
+app.use('/vendor/marked', express.static(path.join(__dirname, 'node_modules', 'marked')));
+app.use('/vendor/highlight.js', express.static(path.join(__dirname, 'node_modules', 'highlight.js')));
+app.use('/vendor/katex', express.static(path.join(__dirname, 'node_modules', 'katex')));
 
 // Set up Multer for file uploads
 const upload = multer({ dest: 'uploads/' });
@@ -364,6 +369,14 @@ wss.on('connection', (ws) => {
 
 app.get('/api/health', (req, res) => {
     res.json({ status: 'starbox-ui-active' });
+});
+
+app.post('/api/shutdown', (req, res) => {
+    console.log('[SHUTDOWN] Received shutdown request from UI. Exiting...');
+    res.json({ ok: true });
+    setTimeout(() => {
+        process.exit(0);
+    }, 500);
 });
 
 let currentPort = parseInt(process.env.PORT, 10) || 4000;

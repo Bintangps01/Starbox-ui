@@ -1,7 +1,7 @@
 {
   "name": "starbox-ui",
-  "version": "0.1.0-a",
-  "description": "A sleek, local-first AI chat interface for Ollama. Premium UI with real-time streaming, thinking mode visualization, and full conversation history management.",
+  "version": "0.1.1-a",
+  "description": "A sleek, local AI chat interface for Ollama. Premium UI with real-time streaming, thinking mode visualization, and full conversation history management.",
   "main": "server.js",
   "scripts": {
     "start": "npm run build:css && node server.js",
@@ -27,17 +27,21 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "homepage": "https://github.com/bintangps01/starbox-ai#readme",
+  "homepage": "https://github.com/bintangps01/starbox-ui#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bintangps01/starbox-ai.git"
+    "url": "https://github.com/bintangps01/starbox-ui.git"
   },
   "bugs": {
-    "url": "https://github.com/bintangps01/starbox-ai/issues"
+    "url": "https://github.com/bintangps01/starbox-ui/issues"
   },
   "dependencies": {
+    "@phosphor-icons/web": "^2.1.2",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.44",
+    "marked": "^17.0.5",
     "multer": "^2.1.1",
     "ws": "^8.20.0"
   },
