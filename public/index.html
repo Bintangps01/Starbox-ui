@@ -274,7 +274,7 @@
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="modal-overlay hidden">
-        <div class="modal-card glass-card relative">
+        <div class="modal-card glass-card relative" style="width: 380px; max-width: calc(100vw - 32px);">
             <button id="closeSettingsBtn" class="absolute top-4 right-4 text-white/40 hover:text-white/80 transition">
                 <i class="ph ph-x"></i>
             </button>
@@ -284,8 +284,49 @@
             <h3 class="text-base font-semibold text-white/90 mt-3 mb-6">Settings</h3>
 
             <div class="space-y-3">
+
+                <!-- Limit Messages Setting -->
+                <div class="p-3 bg-white/5 border border-white/10 rounded-xl">
+                    <div class="flex items-center justify-between">
+                        <div class="text-left">
+                            <div class="text-sm font-medium text-white/80">Limit Rendered Messages</div>
+                            <div class="text-xs text-white/40 mt-0.5">Limits the number of messages to render</div>
+                        </div>
+                        <label class="thinking-switch ml-3">
+                            <input type="checkbox" id="limitMessagesToggle">
+                            <div class="switch-track">
+                                <div class="switch-thumb">
+                                    <i class="ph ph-list-numbers text-[9px]"></i>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                    <!-- Messages per page stepper — shown only when toggle is on -->
+                    <div id="messageLimitRow" class="hidden mt-3 pt-3 border-t border-white/[0.07]">
+                        <div class="flex items-center justify-between">
+                            <div class="text-left">
+                                <div class="text-xs font-medium text-white/60">Messages per page</div>
+                                <div class="text-xs text-white/30 mt-0.5">Click "Load more" at the top to see older
+                                    messages</div>
+                            </div>
+                            <div class="flex items-center gap-2 ml-3">
+                                <button id="messageLimitMinus"
+                                    class="w-7 h-7 rounded-lg bg-white/5 border border-white/10 text-white/50 hover:bg-white/10 hover:text-white flex items-center justify-center text-base transition-colors font-medium">
+                                    <i class="ph ph-minus text-xs"></i>
+                                </button>
+                                <input id="messageLimitInput" type="number" min="5" max="100" step="5" value="20"
+                                    class="w-12 text-center bg-white/5 border border-white/10 rounded-lg text-xs text-white/80 py-1.5 focus:outline-none focus:border-indigo-500/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none">
+                                <button id="messageLimitPlus"
+                                    class="w-7 h-7 rounded-lg bg-white/5 border border-white/10 text-white/50 hover:bg-white/10 hover:text-white flex items-center justify-center text-base transition-colors font-medium">
+                                    <i class="ph ph-plus text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-between">
-                    <div>
+                    <div class="text-left">
                         <div class="text-sm font-medium text-red-400">Clear History</div>
                         <div class="text-xs text-white/40 mt-0.5">Delete all conversations</div>
                     </div>

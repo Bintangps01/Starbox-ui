@@ -146,12 +146,33 @@ let thinkingBuffer = '';
 let thinkingEl = null;  // DOM element for live thinking block
 let setupEngineDropdown, setupModelDropdown;
 
+// ── Render Settings (localStorage, frontend-only) ─────────────────────────────
+let renderSettings = {
+    limitMessages: false,
+    messageLimit: 20
+};
+let renderOffset = {}; // { [chatId]: startIndex } tracks how far back we've loaded
+
+function loadRenderSettings() {
+    try {
+        const saved = localStorage.getItem('starbox_renderSettings');
+        if (saved) renderSettings = { ...renderSettings, ...JSON.parse(saved) };
+    } catch (e) { /* ignore */ }
+}
+
+function saveRenderSettings() {
+    localStorage.setItem('starbox_renderSettings', JSON.stringify(renderSettings));
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 init();
 
 async function init() {
     setupEngineDropdown = new CustomDropdown('setupEngineDropdown');
     setupModelDropdown = new CustomDropdown('setupModelDropdown');
+
+    loadRenderSettings();
+    applyRenderSettingsToUI();
 
     setupEventListeners();
     await fetchModels();
@@ -172,6 +193,15 @@ async function init() {
     };
     syncPadding();
     if (inputPanel) new ResizeObserver(syncPadding).observe(inputPanel);
+}
+
+function applyRenderSettingsToUI() {
+    const toggle = document.getElementById('limitMessagesToggle');
+    const limitRow = document.getElementById('messageLimitRow');
+    const limitInput = document.getElementById('messageLimitInput');
+    if (toggle) toggle.checked = renderSettings.limitMessages;
+    if (limitRow) limitRow.classList.toggle('hidden', !renderSettings.limitMessages);
+    if (limitInput) limitInput.value = renderSettings.messageLimit;
 }
 
 async function fetchGlobalState() {
@@ -323,6 +353,52 @@ function setupEventListeners() {
     });
 
     if (clearCancelBtn) clearCancelBtn.addEventListener('click', () => clearConfirmModal.classList.add('hidden'));
+
+    // ── Render Settings listeners ──
+    const limitMessagesToggle = document.getElementById('limitMessagesToggle');
+    const messageLimitRow = document.getElementById('messageLimitRow');
+    const messageLimitInput = document.getElementById('messageLimitInput');
+    const messageLimitMinus = document.getElementById('messageLimitMinus');
+    const messageLimitPlus = document.getElementById('messageLimitPlus');
+
+    if (limitMessagesToggle) {
+        limitMessagesToggle.addEventListener('change', () => {
+            renderSettings.limitMessages = limitMessagesToggle.checked;
+            saveRenderSettings();
+            if (messageLimitRow) messageLimitRow.classList.toggle('hidden', !renderSettings.limitMessages);
+            // Re-render active chat with new setting
+            if (globalState.activeChatId) loadChat(globalState.activeChatId);
+        });
+    }
+
+    if (messageLimitMinus) {
+        messageLimitMinus.addEventListener('click', () => {
+            const newVal = Math.max(5, renderSettings.messageLimit - 5);
+            renderSettings.messageLimit = newVal;
+            saveRenderSettings();
+            if (messageLimitInput) messageLimitInput.value = newVal;
+        });
+    }
+
+    if (messageLimitPlus) {
+        messageLimitPlus.addEventListener('click', () => {
+            const newVal = Math.min(100, renderSettings.messageLimit + 5);
+            renderSettings.messageLimit = newVal;
+            saveRenderSettings();
+            if (messageLimitInput) messageLimitInput.value = newVal;
+        });
+    }
+
+    if (messageLimitInput) {
+        messageLimitInput.addEventListener('change', () => {
+            const parsed = parseInt(messageLimitInput.value, 10);
+            if (!isNaN(parsed)) {
+                renderSettings.messageLimit = Math.max(5, Math.min(100, Math.round(parsed / 5) * 5));
+                messageLimitInput.value = renderSettings.messageLimit;
+                saveRenderSettings();
+            }
+        });
+    }
 
     if (clearProceedBtn) clearProceedBtn.addEventListener('click', () => {
         globalState.chats = [];
@@ -797,7 +873,17 @@ function loadChat(id) {
     messagesContainer.innerHTML = '';
     emptyState.classList.toggle('hidden', chat.messages.length > 0);
 
-    chat.messages.forEach((msg, idx) => renderMessage(msg.role, msg.content, idx));
+    if (renderSettings.limitMessages && chat.messages.length > renderSettings.messageLimit) {
+        // Start rendering from the last `messageLimit` messages
+        const startIndex = chat.messages.length - renderSettings.messageLimit;
+        renderOffset[id] = startIndex;
+        prependLoadMoreButton(chat, id);
+        renderMessageBatch(chat, startIndex, chat.messages.length);
+    } else {
+        renderOffset[id] = 0;
+        renderMessageBatch(chat, 0, chat.messages.length);
+    }
+
     if (chat.messages.length) scrollToBottom();
 
     promptInput.value = '';
@@ -805,6 +891,100 @@ function loadChat(id) {
     pendingFiles = [];
     filePreview.innerHTML = '';
     sendBtn.disabled = true;
+}
+
+function renderMessageBatch(chat, startIdx, endIdx) {
+    for (let idx = startIdx; idx < endIdx; idx++) {
+        const msg = chat.messages[idx];
+        if (msg.role === 'ai' && msg.thinkingProcess) {
+            const wrap = renderThinkingBlock(false);
+            updateThinkingBlock(wrap, msg.thinkingProcess);
+        }
+        renderMessage(msg.role, msg.content, idx);
+    }
+}
+
+function prependLoadMoreButton(chat, chatId) {
+    const existing = messagesContainer.querySelector('.load-more-btn-wrapper');
+    if (existing) existing.remove();
+
+    const startIndex = renderOffset[chatId] || 0;
+    if (startIndex <= 0) return;
+
+    const hiddenCount = startIndex;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'load-more-btn-wrapper flex justify-center py-3';
+    wrapper.innerHTML = `
+        <button class="load-more-btn flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium text-white/50 border border-white/10 bg-white/5 hover:bg-white/10 hover:text-white/80 transition-all">
+            <i class="ph ph-arrow-up text-sm"></i>
+            Load ${Math.min(renderSettings.messageLimit, hiddenCount)} more message${Math.min(renderSettings.messageLimit, hiddenCount) !== 1 ? 's' : ''}
+            <span class="text-white/25">(${hiddenCount} hidden)</span>
+        </button>`;
+
+    wrapper.querySelector('.load-more-btn').addEventListener('click', () => {
+        const currentStart = renderOffset[chatId] || 0;
+        const newStart = Math.max(0, currentStart - renderSettings.messageLimit);
+        renderOffset[chatId] = newStart;
+
+        // Save scroll position before prepending so view doesn't jump
+        const prevScrollHeight = chatMessages.scrollHeight;
+
+        // Remove old load more button
+        wrapper.remove();
+
+        // Prepend new batch before the first existing message
+        const fragment = document.createDocumentFragment();
+        const tempContainer = document.createElement('div');
+        for (let idx = newStart; idx < currentStart; idx++) {
+            const msg = chat.messages[idx];
+            if (msg.role === 'ai' && msg.thinkingProcess) {
+                const thinkWrapper = document.createElement('div');
+                thinkWrapper.className = 'w-full thinking-wrapper';
+                thinkWrapper.innerHTML = `
+                    <div class="flex items-start gap-2.5">
+                        <div class="avatar-ai mt-0.5 opacity-60"><i class="ph-fill ph-brain"></i></div>
+                        <div class="thinking-block flex-1 min-w-0 mt-0.5" style="min-height: 28px;">
+                            <button class="thinking-toggle flex items-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors w-full text-left" style="height: 28px;">
+                                <i class="ph ph-caret-down text-[10px] thinking-caret transition-transform duration-200" style="transform: rotate(-90deg);"></i>
+                                <span class="thinking-label">Thought process</span>
+                            </button>
+                            <div class="thinking-content">
+                                <div style="min-height: 0;">
+                                    <pre class="thinking-text text-white/35 text-xs leading-relaxed whitespace-pre-wrap font-mono" style="margin-top: 8px; margin-bottom: 8px;"></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                thinkWrapper.querySelector('.thinking-text').textContent = msg.thinkingProcess;
+                thinkWrapper.querySelector('.thinking-toggle').addEventListener('click', () => {
+                    const content = thinkWrapper.querySelector('.thinking-content');
+                    const caret = thinkWrapper.querySelector('.thinking-caret');
+                    content.classList.toggle('thinking-open');
+                    caret.style.transform = content.classList.contains('thinking-open') ? '' : 'rotate(-90deg)';
+                });
+                fragment.appendChild(thinkWrapper);
+            }
+            // Render message into a temp container, then move it to the fragment
+            renderMessage(msg.role, msg.content, idx, tempContainer);
+            if (tempContainer.lastElementChild) {
+                fragment.appendChild(tempContainer.lastElementChild);
+            }
+        }
+
+        // Insert fragment at the top of messagesContainer
+        messagesContainer.insertBefore(fragment, messagesContainer.firstChild);
+
+        // If there are still hidden messages, prepend a new Load More button
+        if (newStart > 0) {
+            prependLoadMoreButton(chat, chatId);
+        }
+
+        // Restore scroll position so user stays at same visual position
+        const newScrollHeight = chatMessages.scrollHeight;
+        chatMessages.scrollTop += newScrollHeight - prevScrollHeight;
+    });
+
+    messagesContainer.insertBefore(wrapper, messagesContainer.firstChild);
 }
 
 // ── Render AI specific text (Markdown + Math) ───────────────────────────────
@@ -831,7 +1011,8 @@ function renderAIText(content, element) {
 }
 
 // ── Render a message bubble ───────────────────────────────────────────────────
-function renderMessage(role, content, index = null) {
+function renderMessage(role, content, index = null, targetContainer = null) {
+    const container = targetContainer || messagesContainer;
     const wrapper = document.createElement('div');
     wrapper.className = 'w-full message-animate';
 
@@ -881,7 +1062,7 @@ function renderMessage(role, content, index = null) {
         wrapper.querySelector('.copy-msg-btn').addEventListener('click', () => copyToClipboard(content));
     }
 
-    messagesContainer.appendChild(wrapper);
+    container.appendChild(wrapper);
     return wrapper.querySelector('.content-inner');
 }
 
@@ -990,7 +1171,11 @@ function editMessage(index, wrapper) {
         const newText = textarea.value.trim();
         if (!newText) return;
 
-        chat.messages = chat.messages.slice(0, index);
+        // Re-fetch chat dynamically in case globalState was updated via WebSocket
+        const activeChat = globalState.chats.find(c => c.id === globalState.activeChatId);
+        if (!activeChat) return;
+
+        activeChat.messages = activeChat.messages.slice(0, index);
         saveChats();
 
         loadChat(globalState.activeChatId);
@@ -1007,20 +1192,28 @@ function scrollToBottom() {
 }
 
 // ── Thinking block helpers ─────────────────────────────────────────────────────
-function renderThinkingBlock() {
+function renderThinkingBlock(isStreaming = true) {
     const wrapper = document.createElement('div');
     wrapper.className = 'w-full message-animate thinking-wrapper';
+
+    const caretTransform = isStreaming ? '' : 'style="transform: rotate(-90deg);"';
+    const labelText = isStreaming ? 'Thinking…' : 'Thought process';
+    const spinnerHtml = isStreaming ? '<span class="thinking-spinner ml-1"></span>' : '';
+    const contentClass = isStreaming ? 'thinking-open' : '';
+
     wrapper.innerHTML = `
         <div class="flex items-start gap-2.5">
             <div class="avatar-ai mt-0.5 opacity-60"><i class="ph-fill ph-brain"></i></div>
-            <div class="thinking-block flex-1 min-w-0">
-                <button class="thinking-toggle flex items-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors mb-2 w-full text-left">
-                    <i class="ph ph-caret-down text-[10px] thinking-caret transition-transform duration-200"></i>
-                    <span class="thinking-label">Thinking…</span>
-                    <span class="thinking-spinner ml-1"></span>
+            <div class="thinking-block flex-1 min-w-0 mt-0.5" style="min-height: 28px;">
+                <button class="thinking-toggle flex items-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors w-full text-left" style="height: 28px;">
+                    <i class="ph ph-caret-down text-[10px] thinking-caret transition-transform duration-200" ${caretTransform}></i>
+                    <span class="thinking-label">${labelText}</span>
+                    ${spinnerHtml}
                 </button>
-                <div class="thinking-content thinking-open">
-                    <pre class="thinking-text text-white/35 text-xs leading-relaxed whitespace-pre-wrap font-mono"></pre>
+                <div class="thinking-content ${contentClass}">
+                    <div style="min-height: 0;">
+                        <pre class="thinking-text text-white/35 text-xs leading-relaxed whitespace-pre-wrap font-mono" style="margin-top: 8px; margin-bottom: 8px;"></pre>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -1074,6 +1267,9 @@ function connectWebSocket() {
             const preserveLocalChats = isTemporaryChat;
             const localChats = globalState.chats;
             const localActiveChatId = globalState.activeChatId;
+            
+            const prevActiveChat = globalState.chats.find(c => c.id === localActiveChatId);
+            const prevUpdatedAt = prevActiveChat ? prevActiveChat.updatedAt : null;
 
             globalState = { ...globalState, ...data.state };
 
@@ -1091,7 +1287,11 @@ function connectWebSocket() {
                     globalState.activeChatId = globalState.chats[0]?.id;
                     applyStateToUI();
                 } else if (globalState.activeChatId) {
-                    loadChat(globalState.activeChatId);
+                    const newActiveChat = globalState.chats.find(c => c.id === globalState.activeChatId);
+                    const newUpdatedAt = newActiveChat ? newActiveChat.updatedAt : null;
+                    if (localActiveChatId !== globalState.activeChatId || prevUpdatedAt !== newUpdatedAt) {
+                        loadChat(globalState.activeChatId);
+                    }
                 }
             }
         } else if (data.type === 'thinking') {
@@ -1222,13 +1422,17 @@ function finalizeGeneration() {
     if (thinkingEl) {
         collapseThinkingBlock(thinkingEl);
     }
+    
+    const savedThinking = thinkingBuffer;
     thinkingBuffer = '';
     thinkingEl = null;
 
     if (aiMessageBuffer) {
         const chat = globalState.chats.find(c => c.id === globalState.activeChatId);
         if (chat) {
-            chat.messages.push({ role: 'ai', content: aiMessageBuffer });
+            const newMsg = { role: 'ai', content: aiMessageBuffer };
+            if (savedThinking) newMsg.thinkingProcess = savedThinking;
+            chat.messages.push(newMsg);
             chat.updatedAt = Date.now();
             saveChats();
             renderChatList();
