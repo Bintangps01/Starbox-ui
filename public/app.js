@@ -38,6 +38,9 @@ const stopSessionProceedBtn = document.getElementById('stopSessionProceedBtn');
 const shutdownServerBtn = document.getElementById('shutdownServerBtn');
 const tempChatBtn = document.getElementById('tempChatBtn');
 
+const imageLightbox = document.getElementById('imageLightbox');
+const lightboxImage = document.getElementById('lightboxImage');
+
 const persName = document.getElementById('persName');
 const persOccupation = document.getElementById('persOccupation');
 const persMoreInfo = document.getElementById('persMoreInfo');
@@ -301,12 +304,14 @@ function setupEventListeners() {
                 shutdownServerBtn.classList.replace('text-red-400', 'text-green-400');
                 shutdownServerBtn.classList.replace('bg-red-500/10', 'bg-green-500/10');
                 shutdownServerBtn.classList.replace('border-red-500/20', 'border-green-500/20');
+                shutdownServerBtn.classList.replace('hover:bg-red-500/20', 'cursor-not-allowed');
                 showToast('Server has been shut down. You can close this window.', 'info');
             } catch (e) {
                 shutdownServerBtn.innerHTML = '<i class="ph ph-check-circle text-lg"></i> Server Stopped';
                 shutdownServerBtn.classList.replace('text-red-400', 'text-green-400');
                 shutdownServerBtn.classList.replace('bg-red-500/10', 'bg-green-500/10');
                 shutdownServerBtn.classList.replace('border-red-500/20', 'border-green-500/20');
+                shutdownServerBtn.classList.replace('hover:bg-red-500/20', 'cursor-not-allowed');
                 showToast('Server has been shut down. You can close this window.', 'info');
             }
         });
@@ -508,13 +513,25 @@ function setupEventListeners() {
 
     if (stopSessionProceedBtn) {
         stopSessionProceedBtn.addEventListener('click', async () => {
-            stopSessionConfirmModal.classList.add('hidden');
+            // Show loading state
+            const originalContent = stopSessionProceedBtn.innerHTML;
+            stopSessionProceedBtn.innerHTML = '<div class="flex items-center justify-center gap-2"><i class="ph ph-spinner animate-spin text-lg"></i> <span>Unloading...</span></div>';
+            stopSessionProceedBtn.disabled = true;
+            stopSessionCancelBtn.disabled = true;
+
             try {
                 const port = window.location.port || '4000';
                 await fetch(`http://${window.location.hostname}:${port}/api/unload-model`, { method: 'POST' });
             } catch (e) {
                 console.error('Error unloading:', e);
             }
+            
+            // Restore button state and close modal
+            stopSessionProceedBtn.innerHTML = originalContent;
+            stopSessionProceedBtn.disabled = false;
+            stopSessionCancelBtn.disabled = false;
+            stopSessionConfirmModal.classList.add('hidden');
+
             // Update local state immediately for fast feedback
             globalState.sessionActive = false;
             applyStateToUI();
@@ -530,6 +547,41 @@ function setupEventListeners() {
     [closeSidebarBtn, sidebarOverlay].forEach(el => {
         if (el) el.addEventListener('click', closeMobileSidebar);
     });
+
+    // Lightbox
+    if (imageLightbox) {
+        imageLightbox.addEventListener('click', (e) => {
+            if (e.target === imageLightbox) closeLightbox();
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && imageLightbox && !imageLightbox.classList.contains('hidden')) {
+            closeLightbox();
+        }
+    });
+}
+
+function openLightbox(src) {
+    if (!src || !imageLightbox) return;
+    lightboxImage.src = src;
+    imageLightbox.classList.remove('hidden');
+    // Force reflow
+    void imageLightbox.offsetWidth;
+    imageLightbox.classList.remove('opacity-0');
+    lightboxImage.classList.remove('scale-95');
+    lightboxImage.classList.add('scale-100');
+}
+window.openLightbox = openLightbox;
+
+function closeLightbox() {
+    if (!imageLightbox) return;
+    imageLightbox.classList.add('opacity-0');
+    lightboxImage.classList.remove('scale-100');
+    lightboxImage.classList.add('scale-95');
+    setTimeout(() => {
+        imageLightbox.classList.add('hidden');
+        lightboxImage.src = '';
+    }, 300);
 }
 
 function closeMobileSidebar() {
@@ -974,7 +1026,7 @@ function renderMessageBatch(chat, startIdx, endIdx) {
             const wrap = renderThinkingBlock(false);
             updateThinkingBlock(wrap, msg.thinkingProcess);
         }
-        renderMessage(msg.role, msg.content, idx);
+        renderMessage(msg.role, msg.content, idx, null, msg.images);
     }
 }
 
@@ -1039,7 +1091,7 @@ function prependLoadMoreButton(chat, chatId) {
                 fragment.appendChild(thinkWrapper);
             }
             // Render message into a temp container, then move it to the fragment
-            renderMessage(msg.role, msg.content, idx, tempContainer);
+            renderMessage(msg.role, msg.content, idx, tempContainer, msg.images);
             if (tempContainer.lastElementChild) {
                 fragment.appendChild(tempContainer.lastElementChild);
             }
@@ -1132,7 +1184,7 @@ function renderAIText(content, element) {
 }
 
 // ── Render a message bubble ───────────────────────────────────────────────────
-function renderMessage(role, content, index = null, targetContainer = null) {
+function renderMessage(role, content, index = null, targetContainer = null, images = []) {
     const container = targetContainer || messagesContainer;
     const wrapper = document.createElement('div');
     wrapper.className = 'w-full message-animate';
@@ -1140,10 +1192,20 @@ function renderMessage(role, content, index = null, targetContainer = null) {
     const isUser = role === 'user';
 
     if (isUser) {
+        // Render image thumbnails if any were attached to this message
+        const imagesHtml = Array.isArray(images) && images.length > 0
+            ? `<div class="flex flex-wrap gap-2 mb-2">${images.map(src =>
+                `<img src="${src}" alt="Attached image"
+                     class="h-28 max-w-[200px] object-cover rounded-xl border border-white/10 shadow-md cursor-pointer hover:opacity-80 transition-opacity"
+                     onclick="window.openLightbox && window.openLightbox(this.src)">`
+              ).join('')}</div>`
+            : '';
+
         wrapper.innerHTML = `
             <div class="flex justify-end items-start gap-2.5 group">
                 <div class="flex flex-col items-end gap-1 max-w-[85%]">
                     <div class="user-bubble">
+                        ${imagesHtml}
                         <div class="text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(content)}</div>
                     </div>
                     <div class="flex flex-row gap-2 opacity-0 group-hover:opacity-100 transition-opacity pr-1">
@@ -1210,13 +1272,14 @@ function editMessage(index, wrapper) {
     if (!chat || isGenerating) return;
 
     const rawText = chat.messages[index].rawText || chat.messages[index].content;
+    let currentImages = chat.messages[index].images ? [...chat.messages[index].images] : [];
 
     const bubble = wrapper.querySelector('.user-bubble');
-    const originalTextDiv = bubble.querySelector('div');
     const actionsDiv = wrapper.querySelector('.flex-row.gap-2.opacity-0');
 
     // Hide original viewing UI
-    originalTextDiv.style.display = 'none';
+    const originalChildren = Array.from(bubble.children);
+    originalChildren.forEach(child => child.style.display = 'none');
     actionsDiv.style.display = 'none';
     wrapper.classList.remove('group');
 
@@ -1233,6 +1296,29 @@ function editMessage(index, wrapper) {
     textarea.className = 'w-full bg-black/10 border border-white/10 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-indigo-400 resize-none custom-scrollbar';
     textarea.value = rawText;
 
+    const imagePreviewContainer = document.createElement('div');
+    imagePreviewContainer.className = 'flex flex-wrap gap-2 mb-2';
+    
+    const renderEditImages = () => {
+        imagePreviewContainer.innerHTML = '';
+        currentImages.forEach((imgSrc, imgIdx) => {
+            const chip = document.createElement('div');
+            chip.className = 'relative group';
+            chip.innerHTML = `
+                <img src="${imgSrc}" alt="Attached image" class="h-14 w-14 object-cover rounded-xl border border-white/10 shadow-md">
+                <button class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-black/70 border border-white/20 text-white/60 hover:text-red-400 flex items-center justify-center text-[9px] opacity-0 group-hover:opacity-100 transition-opacity" title="Remove image">
+                    <i class="ph ph-x"></i>
+                </button>
+            `;
+            chip.querySelector('button').addEventListener('click', () => {
+                currentImages.splice(imgIdx, 1);
+                renderEditImages();
+            });
+            imagePreviewContainer.appendChild(chip);
+        });
+    };
+    renderEditImages();
+
     const btnRow = document.createElement('div');
     btnRow.className = 'flex justify-end gap-2 mt-1';
 
@@ -1246,6 +1332,9 @@ function editMessage(index, wrapper) {
 
     btnRow.appendChild(cancelBtn);
     btnRow.appendChild(sendBtnUI);
+    if (currentImages.length > 0) {
+        editContainer.appendChild(imagePreviewContainer);
+    }
     editContainer.appendChild(textarea);
     editContainer.appendChild(btnRow);
     bubble.appendChild(editContainer);
@@ -1279,7 +1368,7 @@ function editMessage(index, wrapper) {
         if (bubble.contains(editContainer)) {
             bubble.removeChild(editContainer);
         }
-        originalTextDiv.style.display = '';
+        originalChildren.forEach(child => child.style.display = '');
         actionsDiv.style.display = '';
         wrapper.classList.add('group');
         bubble.style.width = oldWidth;
@@ -1290,7 +1379,7 @@ function editMessage(index, wrapper) {
 
     sendBtnUI.addEventListener('click', () => {
         const newText = textarea.value.trim();
-        if (!newText) return;
+        if (!newText && currentImages.length === 0) return;
 
         // Re-fetch chat dynamically in case globalState was updated via WebSocket
         const activeChat = globalState.chats.find(c => c.id === globalState.activeChatId);
@@ -1300,6 +1389,9 @@ function editMessage(index, wrapper) {
         saveChats();
 
         loadChat(globalState.activeChatId);
+
+        // Populate pendingFiles with these images before calling sendMessage
+        pendingFiles = currentImages.map((src, i) => ({ type: 'image', name: `edited_image_${i}.png`, content: src }));
 
         promptInput.value = newText;
         promptInput.style.height = 'auto';
@@ -1473,11 +1565,12 @@ function sendMessage() {
     const rawText = promptInput.value.trim();
     if (!rawText && pendingFiles.length === 0) return;
 
-    // Build context from files
+    // Separate images from text/file attachments
     let fileContext = '';
+    const attachedImages = []; // full data URIs saved on the message for rendering
     pendingFiles.forEach(f => {
         if (f.type === 'image') {
-            fileContext += `\n\n[Attached image: ${f.name}]`;
+            attachedImages.push(f.content); // e.g. "data:image/jpeg;base64,..."
         } else {
             fileContext += `\n\n--- FILE: ${f.name} ---\n${f.content}\n--- END FILE ---`;
         }
@@ -1486,7 +1579,9 @@ function sendMessage() {
     const fullPrompt = rawText + fileContext;
     const chat = globalState.chats.find(c => c.id === globalState.activeChatId);
 
-    chat.messages.push({ role: 'user', content: fullPrompt, rawText });
+    const userMsg = { role: 'user', content: fullPrompt, rawText };
+    if (attachedImages.length > 0) userMsg.images = attachedImages;
+    chat.messages.push(userMsg);
 
     if (chat.messages.length === 1) {
         chat.title = rawText.substring(0, 32) + (rawText.length > 32 ? '…' : '');
@@ -1512,10 +1607,17 @@ function sendMessage() {
     thinkingEl = null;
 
     // Build structured messages array for /api/chat (gives AI full conversation context)
-    const messages = chat.messages.map(m => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content
-    }));
+    // For vision-capable models, strip the data-URI prefix — Ollama expects raw base64
+    const messages = chat.messages.map(m => {
+        const msg = {
+            role: m.role === 'user' ? 'user' : 'assistant',
+            content: m.content
+        };
+        if (Array.isArray(m.images) && m.images.length > 0) {
+            msg.images = m.images.map(uri => uri.includes(',') ? uri.split(',')[1] : uri);
+        }
+        return msg;
+    });
 
     if (globalState.personalization) {
         const p = globalState.personalization;

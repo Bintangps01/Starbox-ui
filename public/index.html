@@ -133,7 +133,7 @@
             <div class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4 space-y-0.5" id="chatList"></div>
 
             <div class="px-4 py-3 border-t border-white/[0.06] flex items-center justify-between">
-                <span class="text-[11px] text-white/25 font-medium tracking-wide uppercase">v0.1.4-a</span>
+                <span class="text-[11px] text-white/25 font-medium tracking-wide uppercase">v0.1.5-a</span>
                 <button id="settingsBtn" class="text-white/30 hover:text-white/70 transition-colors" title="Settings">
                     <i class="ph ph-gear text-base"></i>
                 </button>
@@ -422,6 +422,11 @@
         </div>
     </div>
 
+
+    <!-- Image Lightbox Modal -->
+    <div id="imageLightbox" class="fixed inset-0 hidden flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity opacity-0" style="z-index: 9999; transition: opacity 0.3s ease;">
+        <img id="lightboxImage" src="" alt="Focus view" class="object-contain shadow-2xl scale-95 transition-transform duration-300" style="max-width: 70vw; max-height: 70vh;">
+    </div>
 
     <script src="app.js"></script>
 </body>

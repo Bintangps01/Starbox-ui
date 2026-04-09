@@ -12,8 +12,8 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 app.use(cors());
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ limit: '5mb', extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vendor/@phosphor-icons/web', express.static(path.join(__dirname, 'node_modules', '@phosphor-icons', 'web')));
 app.use('/vendor/marked', express.static(path.join(__dirname, 'node_modules', 'marked')));
@@ -208,9 +208,18 @@ wss.on('connection', (ws) => {
                     let isTimeout = false;
                     try {
                         // Build messages array for /api/chat (proper multi-turn context)
-                        const chatMessages = Array.isArray(data.messages)
+                        const rawMessages = Array.isArray(data.messages)
                             ? data.messages
                             : [{ role: 'user', content: data.prompt || '' }];
+
+                        // Forward images arrays for vision-capable models
+                        const chatMessages = rawMessages.map(m => {
+                            const msg = { role: m.role, content: m.content };
+                            if (Array.isArray(m.images) && m.images.length > 0) {
+                                msg.images = m.images; // raw base64 strings, no data-URI prefix
+                            }
+                            return msg;
+                        });
 
                         // Prepend a system message if thinking mode is on
                         const payload = { model, stream: true, messages: chatMessages };

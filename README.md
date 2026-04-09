@@ -26,7 +26,7 @@ Currently in alpha state, **Starbox UI** is a premium-designed web interface tha
 - **Real-time Streaming** — Responses appear token-by-token using WebSockets for a fluid, ChatGPT-like experience.
 - **Instant Chat Search** — Filter your entire conversation history in real time from the sidebar.
 - **Drag-and-Drop Reordering** — Reorganize your chat list with native HTML5 drag-and-drop.
-- **File Upload** — Attach images and text documents to conversations. *(Currently not working — will be fixed in the future.)*
+- **File & Image Uploads** — Attach images to conversations for visual analysis using local vision models (like llava or gemma-2).
 - **Persistent History** — All conversations are saved locally to a `data/state.json` file on the server.
 - **Settings Panel** — Centralized settings menu with a safe "Clear All History" feature.
 - **Auto Model Detection** — Automatically fetches all locally available Ollama models on startup via the Ollama REST API, no manual configuration needed.
@@ -71,6 +71,10 @@ ollama pull <model_name>
 **5. Launch Starbox UI:**
 ```bash
 npm start
+```
+or
+```bash
+node server.js
 ```
 
 **6. Open your browser** and navigate to:
