@@ -761,3 +761,12 @@ body {
     opacity: 1 !important;
 }
 
+/* ── Drag & Drop Overlay ──────────────────────────────────────────── */
+.drag-card-pulse {
+    animation: dragCardPulse 2s infinite ease-in-out;
+}
+
+@keyframes dragCardPulse {
+    0%, 100% { box-shadow: 0 4px 20px rgba(99, 102, 241, 0.1); transform: scale(1); }
+    50% { box-shadow: 0 6px 25px rgba(99, 102, 241, 0.2); transform: scale(1.01); }
+}

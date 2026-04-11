@@ -133,7 +133,7 @@
             <div class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4 space-y-0.5" id="chatList"></div>
 
             <div class="px-4 py-3 border-t border-white/[0.06] flex items-center justify-between">
-                <span class="text-[11px] text-white/25 font-medium tracking-wide uppercase">v0.1.5-a</span>
+                <span class="text-[11px] text-white/25 font-medium tracking-wide uppercase">v0.1.6-a</span>
                 <button id="settingsBtn" class="text-white/30 hover:text-white/70 transition-colors" title="Settings">
                     <i class="ph ph-gear text-base"></i>
                 </button>
@@ -426,6 +426,17 @@
     <!-- Image Lightbox Modal -->
     <div id="imageLightbox" class="fixed inset-0 hidden flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity opacity-0" style="z-index: 9999; transition: opacity 0.3s ease;">
         <img id="lightboxImage" src="" alt="Focus view" class="object-contain shadow-2xl scale-95 transition-transform duration-300" style="max-width: 70vw; max-height: 70vh;">
+    </div>
+
+    <!-- Drag Overlay -->
+    <div id="dragOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] hidden flex items-center justify-center border-4 border-dashed border-indigo-500/40 transition-all opacity-0">
+        <div class="glass-card p-10 rounded-3xl flex flex-col items-center shadow-2xl shadow-indigo-500/20 pointer-events-none drag-card-pulse">
+            <div class="w-16 h-16 rounded-2xl bg-indigo-500/10 flex flex-col items-center justify-center mb-5 ring-1 ring-indigo-500/20">
+                <i class="ph ph-upload-simple text-3xl text-indigo-400 opacity-80"></i>
+            </div>
+            <h2 class="text-3xl font-bold text-white/90 mb-2 tracking-tight">Drop files here</h2>
+            <p class="text-indigo-200/50 text-sm font-medium">Release to attach images or documents to the chat</p>
+        </div>
     </div>
 
     <script src="app.js"></script>

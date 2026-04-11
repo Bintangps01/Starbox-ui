@@ -40,6 +40,7 @@ const tempChatBtn = document.getElementById('tempChatBtn');
 
 const imageLightbox = document.getElementById('imageLightbox');
 const lightboxImage = document.getElementById('lightboxImage');
+const dragOverlay = document.getElementById('dragOverlay');
 
 const persName = document.getElementById('persName');
 const persOccupation = document.getElementById('persOccupation');
@@ -154,6 +155,7 @@ let generatingChatId = null;
 let pendingFiles = [];   // [{ type, name, content }] — text or image
 let ws = null;
 let aiMessageBuffer = '';
+let chatDOMCache = {};   // { [chatId]: DocumentFragment } — cached rendered messages
 let aiMessageEl = null;  // DOM element to stream into
 let thinkingBuffer = '';
 let thinkingEl = null;  // DOM element for live thinking block
@@ -425,6 +427,7 @@ function setupEventListeners() {
     if (clearProceedBtn) clearProceedBtn.addEventListener('click', () => {
         globalState.chats = [];
         globalState.activeChatId = null;
+        chatDOMCache = {}; // invalidate all caches
         saveChats();
         createNewChat(true);
         clearConfirmModal.classList.add('hidden');
@@ -559,6 +562,72 @@ function setupEventListeners() {
             closeLightbox();
         }
     });
+
+    // Drag and drop for files
+    let dragCounter = 0;
+
+    document.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        if (!globalState.sessionActive) return;
+        dragCounter++;
+        if (dragCounter === 1 && dragOverlay) {
+            dragOverlay.classList.remove('hidden');
+            // Force reflow
+            void dragOverlay.offsetWidth;
+            dragOverlay.classList.remove('opacity-0');
+        }
+    });
+
+    document.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        if (!globalState.sessionActive) return;
+        dragCounter--;
+        if (dragCounter === 0 && dragOverlay) {
+            dragOverlay.classList.add('opacity-0');
+            setTimeout(() => {
+                if (dragCounter === 0) dragOverlay.classList.add('hidden');
+            }, 300);
+        }
+    });
+
+    document.addEventListener('dragover', (e) => {
+        e.preventDefault();
+    });
+
+    document.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        if (dragOverlay) {
+            dragOverlay.classList.add('opacity-0');
+            setTimeout(() => dragOverlay.classList.add('hidden'), 300);
+        }
+        
+        if (!globalState.sessionActive) return;
+
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            processFilesForUpload(e.dataTransfer.files);
+        }
+    });
+
+    // Paste files from clipboard
+    document.addEventListener('paste', (e) => {
+        if (!globalState.sessionActive) return;
+
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        const filesToUpload = [];
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file') {
+                const file = items[i].getAsFile();
+                if (file) filesToUpload.push(file);
+            }
+        }
+
+        if (filesToUpload.length > 0) {
+            processFilesForUpload(filesToUpload);
+        }
+    });
 }
 
 function openLightbox(src) {
@@ -650,9 +719,8 @@ CustomDropdown.prototype._revertTo = function (val) {
 };
 
 // ── File Upload ───────────────────────────────────────────────────────────────
-async function handleFileUpload(e) {
-    const files = e.target.files;
-    if (!files.length) return;
+async function processFilesForUpload(files) {
+    if (!files || !files.length) return;
 
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) formData.append('files', files[i]);
@@ -716,8 +784,11 @@ async function handleFileUpload(e) {
         loadingEl.remove();
         showToast(`Upload error: ${err.message}`, 'error');
     }
+}
 
-    fileUpload.value = '';
+async function handleFileUpload(e) {
+    await processFilesForUpload(e.target.files);
+    e.target.value = '';
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -782,6 +853,20 @@ function createNewChat(silent = false) {
 
 function saveChats() {
     updateState({ chats: globalState.chats, activeChatId: globalState.activeChatId });
+}
+
+// Debounced version of saveChats — only fires once after rapid calls settle
+let _saveChatsTimer = null;
+function debouncedSaveChats(delay = 300) {
+    clearTimeout(_saveChatsTimer);
+    _saveChatsTimer = setTimeout(() => saveChats(), delay);
+}
+
+// Debounced loadChat — cancels pending renders and only loads the final destination
+let _loadChatTimer = null;
+function debouncedLoadChat(id, delay = 80) {
+    clearTimeout(_loadChatTimer);
+    _loadChatTimer = setTimeout(() => loadChat(id), delay);
 }
 
 function renderChatList() {
@@ -893,10 +978,16 @@ function renderChatList() {
         });
 
         btn.addEventListener('click', () => {
+            if (globalState.activeChatId === chat.id) return; // already active
+
+            // Swap sidebar active indicator immediately (no full re-render)
+            const prev = chatList.querySelector('.chat-item.active');
+            if (prev) prev.classList.remove('active');
+            btn.classList.add('active');
+
             globalState.activeChatId = chat.id;
-            saveChats();
-            renderChatList();
-            loadChat(globalState.activeChatId);
+            debouncedSaveChats();
+            debouncedLoadChat(chat.id); // only render the final destination
             if (window.innerWidth < 768) closeMobileSidebar();
         });
 
@@ -952,6 +1043,7 @@ function renderChatList() {
 
 function deleteChat(id) {
     globalState.chats = globalState.chats.filter(c => c.id !== id);
+    delete chatDOMCache[id]; // invalidate cache
     if (globalState.chats.length === 0) {
         createNewChat(true);
     } else {
@@ -972,18 +1064,37 @@ function loadChat(id) {
     isTemporaryChat = !!chat.isTemporary;
     updateTempChatBtn();
 
-    messagesContainer.innerHTML = '';
     emptyState.classList.toggle('hidden', chat.messages.length > 0);
 
-    if (renderSettings.limitMessages && chat.messages.length > renderSettings.messageLimit) {
-        // Start rendering from the last `messageLimit` messages
-        const startIndex = chat.messages.length - renderSettings.messageLimit;
-        renderOffset[id] = startIndex;
-        prependLoadMoreButton(chat, id);
-        renderMessageBatch(chat, startIndex, chat.messages.length);
+    // If this chat is currently generating, skip cache (need live DOM)
+    const isActiveGeneration = isGenerating && id === generatingChatId;
+
+    // Try to restore from DOM cache
+    if (!isActiveGeneration && chatDOMCache[id] && chatDOMCache[id].msgCount === chat.messages.length) {
+        messagesContainer.innerHTML = '';
+        messagesContainer.appendChild(chatDOMCache[id].fragment.cloneNode(true));
+        // Re-attach event listeners for action buttons
+        rebindMessageActions(chat);
     } else {
-        renderOffset[id] = 0;
-        renderMessageBatch(chat, 0, chat.messages.length);
+        // Full render (and cache the result)
+        messagesContainer.innerHTML = '';
+
+        if (renderSettings.limitMessages && chat.messages.length > renderSettings.messageLimit) {
+            const startIndex = chat.messages.length - renderSettings.messageLimit;
+            renderOffset[id] = startIndex;
+            prependLoadMoreButton(chat, id);
+            renderMessageBatch(chat, startIndex, chat.messages.length);
+        } else {
+            renderOffset[id] = 0;
+            renderMessageBatch(chat, 0, chat.messages.length);
+        }
+
+        // Cache the rendered DOM for future fast switches
+        if (!isActiveGeneration && chat.messages.length > 0) {
+            const frag = document.createDocumentFragment();
+            Array.from(messagesContainer.childNodes).forEach(n => frag.appendChild(n.cloneNode(true)));
+            chatDOMCache[id] = { fragment: frag, msgCount: chat.messages.length };
+        }
     }
 
     if (isGenerating) {
@@ -1010,13 +1121,75 @@ function loadChat(id) {
         }
     }
 
-    if (chat.messages.length || (isGenerating && id === generatingChatId)) scrollToBottom();
+    if (chat.messages.length || isActiveGeneration) scrollToBottom();
 
     promptInput.value = '';
     promptInput.style.height = 'auto';
     pendingFiles = [];
     filePreview.innerHTML = '';
     sendBtn.disabled = true;
+}
+
+/** Re-attach click handlers on cached DOM (copy, edit, lightbox, thinking toggles) */
+function rebindMessageActions(chat) {
+    // Copy buttons
+    messagesContainer.querySelectorAll('.copy-msg-btn').forEach((btn, i) => {
+        btn.addEventListener('click', () => {
+            // Find corresponding message content
+            const msgEl = btn.closest('.w-full.message-animate');
+            const userBubble = msgEl?.querySelector('.user-bubble .text-sm');
+            const aiBubble = msgEl?.querySelector('.ai-bubble');
+            const text = userBubble ? userBubble.textContent : (aiBubble ? aiBubble.textContent : '');
+            copyToClipboard(text);
+        });
+    });
+
+    // Edit buttons
+    messagesContainer.querySelectorAll('.edit-msg-btn').forEach(btn => {
+        const msgEl = btn.closest('.w-full.message-animate');
+        if (msgEl) {
+            const allMsgs = Array.from(messagesContainer.querySelectorAll('.w-full.message-animate'));
+            const idx = allMsgs.indexOf(msgEl);
+            // Adjust index for render offset
+            const offset = renderOffset[chat.id] || 0;
+            btn.addEventListener('click', () => editMessage(offset + idx, msgEl));
+        }
+    });
+
+    // Lightbox images
+    messagesContainer.querySelectorAll('.user-bubble img[onclick]').forEach(img => {
+        img.removeAttribute('onclick');
+        img.addEventListener('click', () => window.openLightbox && window.openLightbox(img.src));
+    });
+
+    // Code copy buttons
+    messagesContainer.querySelectorAll('.code-copy-btn').forEach(copyBtn => {
+        const pre = copyBtn.closest('pre');
+        const codeEl = pre?.querySelector('code');
+        copyBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const code = codeEl?.innerText ?? pre?.innerText ?? '';
+            try { await navigator.clipboard.writeText(code); } catch { }
+            copyBtn.classList.add('copied');
+            copyBtn.innerHTML = '<i class="ph ph-check" style="font-size:12px;"></i><span>Copied!</span>';
+            setTimeout(() => {
+                copyBtn.classList.remove('copied');
+                copyBtn.innerHTML = '<i class="ph ph-copy" style="font-size:12px;"></i><span>Copy</span>';
+            }, 2000);
+        });
+    });
+
+    // Thinking toggles
+    messagesContainer.querySelectorAll('.thinking-toggle').forEach(toggle => {
+        toggle.addEventListener('click', () => {
+            const block = toggle.closest('.thinking-block') || toggle.closest('.thinking-wrapper');
+            if (!block) return;
+            const content = block.querySelector('.thinking-content');
+            const caret = block.querySelector('.thinking-caret');
+            if (content) content.classList.toggle('thinking-open');
+            if (caret) caret.style.transform = content?.classList.contains('thinking-open') ? '' : 'rotate(-90deg)';
+        });
+    });
 }
 
 function renderMessageBatch(chat, startIdx, endIdx) {
@@ -1386,6 +1559,7 @@ function editMessage(index, wrapper) {
         if (!activeChat) return;
 
         activeChat.messages = activeChat.messages.slice(0, index);
+        delete chatDOMCache[globalState.activeChatId]; // invalidate cache
         saveChats();
 
         loadChat(globalState.activeChatId);
@@ -1475,36 +1649,41 @@ function connectWebSocket() {
         if (data.type === 'state_update') {
             const prevSessionActive = globalState.sessionActive;
 
-            // If we have a temporary chat active, the backend doesn't know about it.
-            // Preserve our local chats/activeChatId so the temp chat isn't wiped.
+            // Always keep our local activeChatId — the server echo may be stale
+            // (e.g. user already switched to a different chat before the save round-tripped)
+            const localActiveChatId = globalState.activeChatId;
             const preserveLocalChats = isTemporaryChat;
             const localChats = globalState.chats;
-            const localActiveChatId = globalState.activeChatId;
-            
+
             const prevActiveChat = globalState.chats.find(c => c.id === localActiveChatId);
             const prevUpdatedAt = prevActiveChat ? prevActiveChat.updatedAt : null;
 
-            globalState = { ...globalState, ...data.state };
+            // Merge server state but NEVER let the server overwrite our activeChatId
+            globalState = { ...globalState, ...data.state, activeChatId: localActiveChatId };
 
             if (preserveLocalChats) {
                 globalState.chats = localChats;
-                globalState.activeChatId = localActiveChatId;
             }
 
             if (!isGenerating) {
-                renderChatList();
-                if (prevSessionActive !== globalState.sessionActive) applyStateToUI();
+                if (prevSessionActive !== globalState.sessionActive) {
+                    applyStateToUI();
+                    return;
+                }
 
                 if (globalState.activeChatId && !globalState.chats.find(c => c.id === globalState.activeChatId)) {
-                    // Chat got deleted globally
+                    // Chat got deleted from another tab/device
                     globalState.activeChatId = globalState.chats[0]?.id;
                     applyStateToUI();
                 } else if (globalState.activeChatId) {
+                    // Only reload if the currently-viewed chat's data actually changed
                     const newActiveChat = globalState.chats.find(c => c.id === globalState.activeChatId);
                     const newUpdatedAt = newActiveChat ? newActiveChat.updatedAt : null;
-                    if (localActiveChatId !== globalState.activeChatId || prevUpdatedAt !== newUpdatedAt) {
+                    if (prevUpdatedAt !== newUpdatedAt) {
                         loadChat(globalState.activeChatId);
                     }
+                    // Always sync the sidebar highlight
+                    renderChatList();
                 }
             }
         } else if (data.type === 'thinking') {
@@ -1587,6 +1766,7 @@ function sendMessage() {
         chat.title = rawText.substring(0, 32) + (rawText.length > 32 ? '…' : '');
     }
     chat.updatedAt = Date.now();
+    delete chatDOMCache[globalState.activeChatId]; // invalidate cache
     saveChats();
 
     // Re-render conversation
@@ -1684,6 +1864,7 @@ function finalizeGeneration() {
             if (savedThinking) newMsg.thinkingProcess = savedThinking;
             chat.messages.push(newMsg);
             chat.updatedAt = Date.now();
+            delete chatDOMCache[generatingChatId]; // invalidate cache
             saveChats();
             renderChatList();
         }
