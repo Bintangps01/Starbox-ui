@@ -184,6 +184,8 @@ let chatDOMCache = {};   // { [chatId]: DocumentFragment } — cached rendered m
 let aiMessageEl = null;  // DOM element to stream into
 let thinkingBuffer = '';
 let thinkingEl = null;  // DOM element for live thinking block
+let thinkingStartTime = 0;
+let thinkingDurationMs = 0;
 let setupEngineDropdown, setupModelDropdown;
 
 // ── Render Settings (localStorage, frontend-only) ─────────────────────────────
@@ -588,20 +590,45 @@ function setupEventListeners() {
 
     // Desktop sidebar collapse / expand
     function collapseDesktopSidebar() {
-        sidebar.classList.remove('md:flex');
-        sidebar.classList.add('md:hidden');
-        if (miniSidebar) {
-            miniSidebar.classList.remove('hidden');
-            miniSidebar.classList.add('flex');
-        }
+        sidebar.classList.add('!w-16', 'opacity-0', 'overflow-hidden');
+        setTimeout(() => {
+            sidebar.classList.remove('md:flex');
+            sidebar.classList.add('md:hidden');
+            // Reset state for when it's next expanded
+            sidebar.classList.remove('!w-16', 'opacity-0', 'overflow-hidden');
+            
+            if (miniSidebar) {
+                miniSidebar.classList.remove('hidden');
+                miniSidebar.classList.add('flex', 'opacity-0');
+                
+                // Force reflow
+                void miniSidebar.offsetWidth;
+                miniSidebar.classList.remove('opacity-0');
+            }
+        }, 300);
     }
+    
     function expandDesktopSidebar() {
-        sidebar.classList.remove('md:hidden');
-        sidebar.classList.add('md:flex');
         if (miniSidebar) {
-            miniSidebar.classList.add('hidden');
-            miniSidebar.classList.remove('flex');
+            miniSidebar.classList.add('opacity-0');
         }
+        setTimeout(() => {
+            if (miniSidebar) {
+                miniSidebar.classList.add('hidden');
+                miniSidebar.classList.remove('flex', 'opacity-0');
+            }
+            
+            sidebar.classList.remove('md:hidden');
+            sidebar.classList.add('md:flex', '!w-16', 'opacity-0', 'overflow-hidden');
+            
+            // Force reflow
+            void sidebar.offsetWidth;
+            
+            sidebar.classList.remove('!w-16', 'opacity-0');
+            setTimeout(() => {
+                sidebar.classList.remove('overflow-hidden');
+            }, 300);
+        }, 150); // fast fade-out of mini sidebar
     }
 
     if (collapseSidebarBtn) collapseSidebarBtn.addEventListener('click', collapseDesktopSidebar);
@@ -617,6 +644,14 @@ function setupEventListeners() {
             sidebar.classList.remove('hidden');
             sidebar.classList.add('flex', 'fixed', 'inset-y-0', 'left-0');
             sidebarOverlay.classList.remove('hidden');
+            
+            // Force reflow for animation
+            void sidebar.offsetWidth;
+            
+            sidebar.classList.remove('-translate-x-full');
+            sidebar.classList.add('translate-x-0');
+            sidebarOverlay.classList.remove('opacity-0');
+            sidebarOverlay.classList.add('opacity-100');
         } else {
             // Desktop fallback
             if (sidebar.classList.contains('md:flex')) {
@@ -816,11 +851,23 @@ function closeLightbox() {
 }
 
 function closeMobileSidebar() {
-    if (sidebar) {
-        sidebar.classList.add('hidden');
-        sidebar.classList.remove('flex', 'fixed', 'inset-y-0', 'left-0');
+    if (window.innerWidth >= 768) return; // Prevent interference on desktop
+    
+    if (sidebarOverlay) {
+        sidebarOverlay.classList.remove('opacity-100');
+        sidebarOverlay.classList.add('opacity-0');
     }
-    if (sidebarOverlay) sidebarOverlay.classList.add('hidden');
+    if (sidebar) {
+        sidebar.classList.remove('translate-x-0');
+        sidebar.classList.add('-translate-x-full');
+        setTimeout(() => {
+            if (window.innerWidth < 768) {
+                sidebar.classList.add('hidden');
+                sidebar.classList.remove('flex', 'fixed', 'inset-y-0', 'left-0');
+                if (sidebarOverlay) sidebarOverlay.classList.add('hidden');
+            }
+        }, 300);
+    }
 }
 
 function updateSendBtn() {
@@ -1278,7 +1325,10 @@ function loadChat(id) {
                 thinkingEl = renderThinkingBlock(true);
                 updateThinkingBlock(thinkingEl, thinkingBuffer);
                 if (aiMessageBuffer.trim().length > 0) {
-                    collapseThinkingBlock(thinkingEl);
+                    if (thinkingDurationMs === 0 && thinkingStartTime > 0) {
+                        thinkingDurationMs = Date.now() - thinkingStartTime;
+                    }
+                    collapseThinkingBlock(thinkingEl, thinkingDurationMs);
                 }
             }
             if (aiMessageBuffer.trim().length > 0) {
@@ -1368,7 +1418,7 @@ function renderMessageBatch(chat, startIdx, endIdx) {
     for (let idx = startIdx; idx < endIdx; idx++) {
         const msg = chat.messages[idx];
         if (msg.role === 'ai' && msg.thinkingProcess) {
-            const wrap = renderThinkingBlock(false);
+            const wrap = renderThinkingBlock(false, msg.thinkingDurationMs || 0);
             updateThinkingBlock(wrap, msg.thinkingProcess);
         }
         renderMessage(msg.role, msg.content, idx, null, msg.images);
@@ -1830,12 +1880,19 @@ function scrollToBottom(force = false) {
 }
 
 // ── Thinking block helpers ─────────────────────────────────────────────────────
-function renderThinkingBlock(isStreaming = true) {
+function renderThinkingBlock(isStreaming = true, durationMs = 0) {
     const wrapper = document.createElement('div');
     wrapper.className = 'w-full message-animate thinking-wrapper';
 
     const caretTransform = isStreaming ? '' : 'style="transform: rotate(-90deg);"';
-    const labelText = isStreaming ? 'Thinking…' : 'Thought process';
+    
+    let durationStr = '';
+    if (durationMs > 0) {
+        const secs = (durationMs / 1000).toFixed(1);
+        durationStr = ` <span class="text-white/30 text-[10px] lowercase font-mono font-normal">(${secs}s)</span>`;
+    }
+    
+    const labelText = isStreaming ? 'Thinking…' : 'Thought process' + durationStr;
     const spinnerHtml = isStreaming ? '<span class="thinking-spinner ml-1"></span>' : '';
     const contentClass = isStreaming ? 'thinking-open' : '';
 
@@ -1873,14 +1930,21 @@ function updateThinkingBlock(wrapper, text) {
     scrollToBottom();
 }
 
-function collapseThinkingBlock(wrapper) {
+function collapseThinkingBlock(wrapper, durationMs = 0) {
     const content = wrapper.querySelector('.thinking-content');
     const caret = wrapper.querySelector('.thinking-caret');
     const label = wrapper.querySelector('.thinking-label');
     const spinner = wrapper.querySelector('.thinking-spinner');
     if (content) content.classList.remove('thinking-open');
     if (caret) caret.style.transform = 'rotate(-90deg)';
-    if (label) label.textContent = 'Thought process';
+    
+    let durationStr = '';
+    if (durationMs > 0) {
+        const secs = (durationMs / 1000).toFixed(1);
+        durationStr = ` <span class="text-white/30 text-[10px] lowercase font-mono font-normal">(${secs}s)</span>`;
+    }
+    
+    if (label) label.innerHTML = 'Thought process' + durationStr;
     if (spinner) spinner.remove();
 }
 
@@ -1950,7 +2014,10 @@ function connectWebSocket() {
             // First content token — collapse the thinking block
             if (globalState.activeChatId === generatingChatId) {
                 if (thinkingEl && !aiMessageEl) {
-                    collapseThinkingBlock(thinkingEl);
+                    if (thinkingDurationMs === 0 && thinkingStartTime > 0) {
+                        thinkingDurationMs = Date.now() - thinkingStartTime;
+                    }
+                    collapseThinkingBlock(thinkingEl, thinkingDurationMs);
                 }
             }
 
@@ -2051,6 +2118,8 @@ async function sendMessage() {
     aiMessageEl = null;
     thinkingBuffer = '';
     thinkingEl = null;
+    thinkingStartTime = Date.now();
+    thinkingDurationMs = 0;
 
     // Build structured messages array for /api/chat (gives AI full conversation context)
     // For vision-capable models, strip the data-URI prefix — Ollama expects raw base64
@@ -2150,10 +2219,14 @@ function finalizeGeneration() {
 
     // Ensure thinking block collapses after done (covers cases where stream started but no content yet)
     if (thinkingEl && globalState.activeChatId === generatingChatId) {
-        collapseThinkingBlock(thinkingEl);
+        if (thinkingDurationMs === 0 && thinkingStartTime > 0) {
+            thinkingDurationMs = Date.now() - thinkingStartTime;
+        }
+        collapseThinkingBlock(thinkingEl, thinkingDurationMs);
     }
     
     const savedThinking = thinkingBuffer;
+    const finalThinkingDuration = thinkingDurationMs;
     thinkingBuffer = '';
     thinkingEl = null;
 
@@ -2161,7 +2234,10 @@ function finalizeGeneration() {
         const chat = globalState.chats.find(c => c.id === generatingChatId);
         if (chat) {
             const newMsg = { role: 'ai', content: aiMessageBuffer };
-            if (savedThinking) newMsg.thinkingProcess = savedThinking;
+            if (savedThinking) {
+                newMsg.thinkingProcess = savedThinking;
+                if (finalThinkingDuration > 0) newMsg.thinkingDurationMs = finalThinkingDuration;
+            }
             chat.messages.push(newMsg);
             chat.updatedAt = Date.now();
             delete chatDOMCache[generatingChatId]; // invalidate cache
