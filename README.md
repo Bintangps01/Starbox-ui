@@ -1,4 +1,8 @@
-<h1 align="center">✨ Starbox UI</h1>
+<p align="center">
+  <img src="public/logo.svg" width="100" />
+</p>
+
+<h1 align="center">Starbox UI</h1>
 
 <p align="center">
   <b>A sleek, local AI chat interface built for <a href="https://ollama.com/">Ollama</a></b>
