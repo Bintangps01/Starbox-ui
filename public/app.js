@@ -732,6 +732,7 @@ function setupEventListeners() {
     let dragCounter = 0;
 
     document.addEventListener('dragenter', (e) => {
+        if (window.innerWidth < 768) return;
         e.preventDefault();
         if (!e.dataTransfer || !e.dataTransfer.types || !Array.from(e.dataTransfer.types).includes('Files')) return;
         if (!globalState.sessionActive) return;
@@ -745,6 +746,7 @@ function setupEventListeners() {
     });
 
     document.addEventListener('dragleave', (e) => {
+        if (window.innerWidth < 768) return;
         e.preventDefault();
         if (!e.dataTransfer || !e.dataTransfer.types || !Array.from(e.dataTransfer.types).includes('Files')) return;
         if (!globalState.sessionActive) return;
@@ -758,10 +760,12 @@ function setupEventListeners() {
     });
 
     document.addEventListener('dragover', (e) => {
+        if (window.innerWidth < 768) return;
         e.preventDefault();
     });
 
     document.addEventListener('drop', (e) => {
+        if (window.innerWidth < 768) return;
         e.preventDefault();
         if (!e.dataTransfer || !e.dataTransfer.types || !Array.from(e.dataTransfer.types).includes('Files')) return;
         dragCounter = 0;
@@ -1605,7 +1609,7 @@ function prependLoadMoreButton(chat, chatId) {
                 thinkWrapper.className = 'w-full thinking-wrapper';
                 thinkWrapper.innerHTML = `
                     <div class="flex items-start gap-2.5">
-                        <div class="avatar-ai mt-0.5 opacity-60"><i class="ph-fill ph-brain"></i></div>
+                        <div class="avatar-ai mt-0.5 opacity-60"><div class="w-4 h-4 bg-current" style="-webkit-mask: url('logo.svg') center/contain no-repeat; mask: url('logo.svg') center/contain no-repeat;"></div></div>
                         <div class="thinking-block flex-1 min-w-0 mt-0.5" style="min-height: 28px;">
                             <button class="thinking-toggle flex items-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors w-full text-left" style="height: 28px;">
                                 <i class="ph ph-caret-down text-[10px] thinking-caret transition-transform duration-200" style="transform: rotate(-90deg);"></i>
@@ -1765,7 +1769,7 @@ function renderMessage(role, content, index = null, targetContainer = null, imag
     } else {
         wrapper.innerHTML = `
             <div class="flex items-start gap-2.5 group">
-                <div class="avatar-ai mt-0.5"><i class="ph-fill ph-sparkle"></i></div>
+                <div class="avatar-ai mt-0.5"><div class="w-4 h-4 bg-current" style="-webkit-mask: url('logo.svg') center/contain no-repeat; mask: url('logo.svg') center/contain no-repeat;"></div></div>
                 <div class="flex flex-col items-start gap-1 w-full overflow-hidden">
                     <div class="ai-bubble markdown-body content-inner w-full"></div>
                     <div class="flex flex-row gap-2 opacity-0 group-hover:opacity-100 transition-opacity pl-1">
@@ -2040,7 +2044,7 @@ function renderThinkingBlock(isStreaming = true, durationMs = 0) {
 
     wrapper.innerHTML = `
         <div class="flex items-start gap-2.5">
-            <div class="avatar-ai mt-0.5 opacity-60"><i class="ph-fill ph-brain"></i></div>
+            <div class="avatar-ai mt-0.5 opacity-60"><div class="w-4 h-4 bg-current" style="-webkit-mask: url('logo.svg') center/contain no-repeat; mask: url('logo.svg') center/contain no-repeat;"></div></div>
             <div class="thinking-block flex-1 min-w-0 mt-0.5" style="min-height: 28px;">
                 <button class="thinking-toggle flex items-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors w-full text-left" style="height: 28px;">
                     <i class="ph ph-caret-down text-[10px] thinking-caret transition-transform duration-200" ${caretTransform}></i>
