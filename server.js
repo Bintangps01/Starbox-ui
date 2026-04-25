@@ -44,6 +44,7 @@ const defaultState = {
     activeChatId: null,
     personalization: { name: '', occupation: '', moreInfo: '', instructions: '' },
     webSearch: { enabled: false, tavilyApiKey: '' },
+    folders: [],
     chats: []
 };
 

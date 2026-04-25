@@ -140,7 +140,7 @@
             <div class="flex-1 overflow-y-auto custom-scrollbar px-2 pb-4 space-y-0.5 w-64" id="chatList"></div>
 
             <div class="px-4 py-3 border-t border-white/[0.06] flex items-center justify-between w-64">
-                <span class="text-[11px] text-white/25 font-medium tracking-wide uppercase">v0.2.4-a</span>
+                <span class="text-[11px] text-white/25 font-medium tracking-wide uppercase">v0.2.5-a</span>
                 <div class="flex items-center gap-2">
                     <button id="settingsBtn" class="text-white/30 hover:text-white/70 transition-colors"
                         title="Settings">
@@ -567,6 +567,31 @@
             <div class="flex gap-2 w-full">
                 <button id="deleteChatCancelBtn" class="modal-btn modal-btn-cancel flex-1">Cancel</button>
                 <button id="deleteChatProceedBtn"
+                    class="modal-btn bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 flex-1">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Folder Confirm Modal -->
+    <div id="deleteFolderConfirmModal" class="modal-overlay hidden z-50">
+        <div class="modal-card glass-card">
+            <div class="modal-icon !bg-red-500/10 !border-red-500/20">
+                <i class="ph ph-folder-minus text-2xl text-red-400"></i>
+            </div>
+            <h3 class="text-base font-semibold text-white/90 mt-3 mb-1">Delete Folder?</h3>
+            <p class="text-sm text-white/50 leading-relaxed mb-4">Are you sure you want to delete this folder? This action
+                cannot be undone.</p>
+            <label class="flex items-center gap-2.5 mb-5 cursor-pointer select-none justify-center">
+                <div class="relative w-9 h-5 flex-shrink-0">
+                    <input type="checkbox" id="deleteFolderChatsCheckbox" class="sr-only peer">
+                    <div class="w-full h-full rounded-full bg-white/10 border border-white/15 peer-checked:bg-red-500/30 peer-checked:border-red-500/40 transition-all"></div>
+                    <div class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white/30 peer-checked:translate-x-4 peer-checked:bg-red-400 transition-all"></div>
+                </div>
+                <span class="text-xs text-white/50 leading-tight text-left">Also delete everything inside this folder</span>
+            </label>
+            <div class="flex gap-2 w-full">
+                <button id="deleteFolderCancelBtn" class="modal-btn modal-btn-cancel flex-1">Cancel</button>
+                <button id="deleteFolderProceedBtn"
                     class="modal-btn bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 flex-1">Delete</button>
             </div>
         </div>

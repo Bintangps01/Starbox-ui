@@ -45,6 +45,11 @@ const tempChatBtn = document.getElementById('tempChatBtn');
 const importChatBtn = document.getElementById('importChatBtn');
 const importChatFileInput = document.getElementById('importChatFileInput');
 
+const deleteFolderConfirmModal = document.getElementById('deleteFolderConfirmModal');
+const deleteFolderCancelBtn = document.getElementById('deleteFolderCancelBtn');
+const deleteFolderProceedBtn = document.getElementById('deleteFolderProceedBtn');
+const deleteFolderChatsCheckbox = document.getElementById('deleteFolderChatsCheckbox');
+
 const imageLightbox = document.getElementById('imageLightbox');
 const lightboxImage = document.getElementById('lightboxImage');
 const dragOverlay = document.getElementById('dragOverlay');
@@ -74,6 +79,7 @@ const modelIdleRestartWarning = document.getElementById('modelIdleRestartWarning
 let chatSearchQuery = '';
 let draggedChatId = null;
 let chatToDeleteId = null;
+let folderToDeleteId = null;
 let isTemporaryChat = false; // When true, active chat is not persisted to backend
 let isWebSearchActive = false; // Per-send toggle: web search ON for the next message only
 let isUserScrolledUp = false;
@@ -87,9 +93,9 @@ if (chatMessages) {
 }
 
 document.addEventListener('click', (e) => {
-    if (!e.target.closest('.chat-actions')) {
-        document.querySelectorAll('.chat-options-menu').forEach(m => m.classList.add('hidden'));
-        document.querySelectorAll('.chat-actions').forEach(a => a.style.opacity = '');
+    if (!e.target.closest('.chat-actions') && !e.target.closest('.folder-actions')) {
+        document.querySelectorAll('.chat-options-menu, .folder-options-menu').forEach(m => m.classList.add('hidden'));
+        document.querySelectorAll('.chat-actions, .folder-actions').forEach(a => a.style.opacity = '');
         // Restore drag state if closed, skipping items actively being renamed
         document.querySelectorAll('.chat-item').forEach(btn => {
             if (!btn.querySelector('input')) btn.draggable = true;
@@ -185,6 +191,7 @@ let globalState = {
     model: '',
     thinkingMode: false,
     activeChatId: null,
+    folders: [],
     chats: []
 };
 let availableModels = { ollama: [], claude: [] };
@@ -264,6 +271,9 @@ async function fetchGlobalState() {
         const port = window.location.port || '4000';
         const res = await fetch(`http://${window.location.hostname}:${port}/api/state`);
         globalState = await res.json();
+
+        // Ensure folders array exists for backward compatibility
+        if (!globalState.folders) globalState.folders = [];
 
         // Sanitize legacy state
         if (globalState.engine === 'claude') {
@@ -422,6 +432,24 @@ function setupEventListeners() {
         updateTempChatBtn();
         createNewChat(false);
     });
+
+
+    if (deleteFolderCancelBtn) {
+        deleteFolderCancelBtn.addEventListener('click', () => {
+            if (deleteFolderConfirmModal) deleteFolderConfirmModal.classList.add('hidden');
+            folderToDeleteId = null;
+        });
+    }
+    if (deleteFolderProceedBtn) {
+        deleteFolderProceedBtn.addEventListener('click', () => {
+            if (folderToDeleteId) {
+                const deleteChats = deleteFolderChatsCheckbox ? deleteFolderChatsCheckbox.checked : false;
+                deleteFolder(folderToDeleteId, deleteChats);
+            }
+            if (deleteFolderConfirmModal) deleteFolderConfirmModal.classList.add('hidden');
+            folderToDeleteId = null;
+        });
+    }
 
     if (tempChatBtn) {
         tempChatBtn.addEventListener('click', () => {
@@ -1187,6 +1215,95 @@ function debouncedSaveChats(delay = 300) {
     _saveChatsTimer = setTimeout(() => saveChats(), delay);
 }
 
+// ── Folder management ─────────────────────────────────────────────────────────
+function saveFolders() {
+    updateState({ folders: globalState.folders, foldersExpanded: globalState.foldersExpanded });
+}
+
+function createFolder() {
+    const folder = { id: 'f_' + Date.now(), name: 'New Folder', isExpanded: true, createdAt: Date.now() };
+    if (!globalState.folders) globalState.folders = [];
+    globalState.folders.push(folder);
+    
+    // Do NOT call saveFolders() here yet!
+    // The server echo will broadcast the state update and immediately re-render 
+    // the chat list, destroying the rename input before the user finishes typing.
+    // We will save it after the user hits Enter or clicks away.
+    renderChatList();
+    
+    // Immediately enter rename mode on the new folder header
+    setTimeout(() => {
+        const headerEl = document.querySelector(`[data-folder-id="${folder.id}"] .folder-header`);
+        if (headerEl) triggerFolderRename(folder, headerEl);
+    }, 40);
+}
+
+function deleteFolder(id, deleteChatsInFolder) {
+    if (!globalState.folders) return;
+    globalState.folders = globalState.folders.filter(f => f.id !== id);
+    if (deleteChatsInFolder) {
+        globalState.chats = globalState.chats.filter(c => c.folderId !== id);
+        chatDOMCache = {};
+        if (!globalState.chats.find(c => c.id === globalState.activeChatId)) {
+            const next = globalState.chats.find(c => !c.isTemporary);
+            globalState.activeChatId = next ? next.id : null;
+            if (next) { loadChat(next.id); } else { createNewChat(true); }
+        }
+    } else {
+        // Evict chats from folder without deleting them
+        globalState.chats.forEach(c => { if (c.folderId === id) c.folderId = null; });
+    }
+    updateState({ folders: globalState.folders, chats: globalState.chats, activeChatId: globalState.activeChatId });
+    renderChatList();
+}
+
+function triggerFolderRename(folder, headerEl) {
+    const nameEl = headerEl.querySelector('.folder-name-text');
+    if (!nameEl) return;
+    const current = folder.name;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = current;
+    input.className = 'flex-1 min-w-0 bg-black/20 text-white/90 text-[13px] px-1 py-0.5 rounded border border-white/20 focus:outline-none focus:border-indigo-400 pointer-events-auto';
+
+    const save = () => {
+        if (input.dataset.saved) return;
+        input.dataset.saved = 'true';
+        const newName = input.value.trim() || current;
+        // Always look up the live folder reference by ID to avoid stale closure
+        const liveFolder = (globalState.folders || []).find(f => f.id === folder.id);
+        if (liveFolder) liveFolder.name = newName;
+        saveFolders();
+        renderChatList();
+    };
+
+    // Defer blur listener so the programmatic focus() below doesn't fire it immediately
+    input.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { input.dataset.saved = 'true'; input.value = current; renderChatList(); }
+    });
+    input.addEventListener('click', e => e.stopPropagation());
+
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    // Attach blur only after focus settles to avoid immediate false-trigger
+    requestAnimationFrame(() => {
+        input.addEventListener('blur', save);
+    });
+}
+
+function moveChatToFolder(chatId, folderId) {
+    const chat = globalState.chats.find(c => c.id === chatId);
+    if (!chat) return;
+    if (folderId !== null && chat.isPinned) chat.isPinned = false; // unpin when entering a folder
+    chat.folderId = folderId;
+    saveChats();
+    renderChatList();
+}
+
 // Debounced loadChat — cancels pending renders and only loads the final destination
 let _loadChatTimer = null;
 function debouncedLoadChat(id, delay = 80) {
@@ -1196,215 +1313,449 @@ function debouncedLoadChat(id, delay = 80) {
 
 function renderChatList() {
     chatList.innerHTML = '';
+    const allChats = globalState.chats.filter(c => !c.isTemporary && c.messages.length > 0);
+    const folders = globalState.folders || [];
 
-    const filteredChats = globalState.chats.filter(chat =>
-        !chat.isTemporary &&
-        chat.title.toLowerCase().includes(chatSearchQuery) &&
-        chat.messages.length > 0
-    );
+    // ── Search mode: flat list ignoring folder structure ──────────────────────
+    if (chatSearchQuery) {
+        const matching = allChats.filter(c => c.title.toLowerCase().includes(chatSearchQuery));
+        const pinned = matching.filter(c => c.isPinned);
+        const unpinned = matching.filter(c => !c.isPinned);
+        [...pinned, ...unpinned].forEach(chat => appendChatItem(chatList, chat));
+        return;
+    }
 
-    const pinnedChats = filteredChats.filter(c => c.isPinned);
-    const unpinnedChats = filteredChats.filter(c => !c.isPinned);
-    const chatsToRender = [...pinnedChats, ...unpinnedChats];
+    if (globalState.foldersExpanded === undefined) globalState.foldersExpanded = true;
+    if (globalState.chatsExpanded === undefined) globalState.chatsExpanded = true;
 
-    chatsToRender.forEach((chat, index) => {
-        const btn = document.createElement('button');
-        btn.className = 'chat-item group' + (chat.id === globalState.activeChatId ? ' active' : '');
-        btn.draggable = true;
+    // ── Folders section ───────────────────────────────────────────────────────
+    const foldersLabel = document.createElement('div');
+    foldersLabel.className = 'sidebar-section-label flex justify-between items-center cursor-pointer select-none group';
+    
+    const foldersLabelLeft = document.createElement('div');
+    foldersLabelLeft.className = 'flex items-center gap-1.5 text-white/40 group-hover:text-white/60 transition-colors';
+    
+    const foldersChevron = document.createElement('i');
+    foldersChevron.className = `ph ph-caret-right text-[10px] transition-transform duration-200 ${globalState.foldersExpanded ? 'rotate-90' : ''}`;
+    foldersLabelLeft.appendChild(foldersChevron);
 
-        btn.innerHTML = `
-            <div class="flex items-center gap-2 min-w-0 flex-1 pointer-events-none">
-                <i class="${chat.isPinned ? 'ph-fill ph-push-pin text-indigo-400 opacity-80' : 'ph ph-chat-teardrop'} text-sm flex-shrink-0"></i>
-                <span class="truncate chat-title-text">${escapeHtml(chat.title)}</span>
-            </div>
-            <div class="chat-actions relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="options-trigger flex-shrink-0 flex items-center justify-center w-6 h-6 text-white/40 hover:text-white transition" title="Options">
-                    <i class="ph ph-dots-three-outline-vertical text-[18px]"></i>
-                </button>
-                <div class="chat-options-menu glass-dropdown hidden shadow-2xl overflow-hidden" style="left: auto; right: 0; top: calc(100% + 4px); min-width: 130px; z-index: 50; padding: 4px;">
-                    <div class="dropdown-option pin-chat text-white/80 hover:text-white mb-0.5">
-                        <i class="ph ${chat.isPinned ? 'ph-push-pin-slash' : 'ph-push-pin'} text-sm"></i> ${chat.isPinned ? 'Unpin' : 'Pin'}
-                    </div>
-                    <div class="dropdown-option rename-chat text-white/80 hover:text-white mb-0.5">
-                        <i class="ph ph-pencil-simple text-sm"></i> Rename
-                    </div>
-                    <div class="dropdown-option export-chat text-white/80 hover:text-white mb-0.5">
-                        <i class="ph ph-export text-sm"></i> Export
-                    </div>
-                    <div class="dropdown-option delete-chat !text-red-500 hover:!text-red-400 hover:!bg-red-500/10">
-                        <i class="ph ph-trash text-sm"></i> Delete
-                    </div>
-                </div>
-            </div>`;
-
-        const optionsTrigger = btn.querySelector('.options-trigger');
-        const optionsMenu = btn.querySelector('.chat-options-menu');
-        const actionsDiv = btn.querySelector('.chat-actions');
-
-        optionsTrigger.addEventListener('click', e => {
-            e.stopPropagation();
-            const isHidden = optionsMenu.classList.contains('hidden');
-            
-            // Hide all other menus
-            document.querySelectorAll('.chat-options-menu').forEach(menu => menu.classList.add('hidden'));
-            document.querySelectorAll('.chat-actions').forEach(act => {
-                act.style.opacity = ''; // Remove inline opacity
-            });
-            
-            // Restore draggable for all items just in case (except renaming items)
-            document.querySelectorAll('.chat-item').forEach(b => {
-                if (!b.querySelector('input')) b.draggable = true;
-            });
-            
-            if (isHidden) {
-                optionsMenu.classList.remove('hidden');
-                actionsDiv.style.opacity = '1'; // Force actions to stay visible
-                btn.draggable = false; // Disable exclusively for the opened item
-            } else {
-                btn.draggable = true; // Toggled closed explicitly
-            }
-        });
-
-        btn.querySelector('.delete-chat').addEventListener('click', e => {
-            e.stopPropagation();
-            optionsMenu.classList.add('hidden');
-            actionsDiv.style.opacity = '';
-            chatToDeleteId = chat.id;
-            deleteChatConfirmModal.classList.remove('hidden');
-        });
-
-        btn.querySelector('.export-chat').addEventListener('click', e => {
-            e.stopPropagation();
-            optionsMenu.classList.add('hidden');
-            actionsDiv.style.opacity = '';
-            exportChat(chat.id);
-        });
-
-        const pinBtn = btn.querySelector('.pin-chat');
-        if (pinBtn) {
-            pinBtn.addEventListener('click', e => {
-                e.stopPropagation();
-                optionsMenu.classList.add('hidden');
-                actionsDiv.style.opacity = '';
-                chat.isPinned = !chat.isPinned;
-                saveChats();
-                renderChatList();
-            });
+    const foldersLabelText = document.createElement('span');
+    foldersLabelText.textContent = 'Folders';
+    foldersLabelLeft.appendChild(foldersLabelText);
+    foldersLabel.appendChild(foldersLabelLeft);
+    
+    const newFolderIconBtn = document.createElement('button');
+    newFolderIconBtn.className = 'text-white/40 hover:text-white transition-colors cursor-pointer p-0.5 flex items-center justify-center rounded hover:bg-white/5 opacity-0 group-hover:opacity-100';
+    newFolderIconBtn.title = 'Create New Folder';
+    newFolderIconBtn.innerHTML = '<i class="ph ph-plus text-[13px]"></i>';
+    newFolderIconBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (!globalState.foldersExpanded) {
+            globalState.foldersExpanded = true;
+            // State will be saved implicitly when the folder name is saved
         }
+        createFolder();
+    });
+    foldersLabel.appendChild(newFolderIconBtn);
+    
+    foldersLabel.addEventListener('click', () => {
+        globalState.foldersExpanded = !globalState.foldersExpanded;
+        updateState({ foldersExpanded: globalState.foldersExpanded });
+        renderChatList();
+    });
 
-        btn.querySelector('.rename-chat').addEventListener('click', e => {
-            e.stopPropagation();
-            optionsMenu.classList.add('hidden');
-            actionsDiv.style.opacity = '';
-            
-            const titleContainer = btn.querySelector('.chat-title-text');
-            const currentTitle = chat.title;
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.value = currentTitle;
-            input.className = 'w-full bg-black/20 text-white/90 text-[13px] px-1 py-0.5 rounded border border-white/20 focus:outline-none focus:border-indigo-400 pointer-events-auto';
-            
-            actionsDiv.style.display = 'none';
+    chatList.appendChild(foldersLabel);
 
-            const save = () => {
-                const newTitle = input.value.trim();
-                if (input.dataset.saved) return;
-                input.dataset.saved = 'true';
+    const foldersContainer = document.createElement('div');
+    if (!globalState.foldersExpanded) foldersContainer.classList.add('hidden');
+    chatList.appendChild(foldersContainer);
 
-                if (newTitle && newTitle !== currentTitle) {
-                    chat.title = newTitle;
-                    saveChats();
-                }
-                renderChatList();
-            };
+    if (folders.length > 0) {
+        folders.forEach(folder => appendFolderItem(folder, allChats, foldersContainer));
+    }
 
-            input.addEventListener('blur', save);
-            input.addEventListener('keydown', e => {
-                e.stopPropagation();
-                if (e.key === 'Enter') save();
-                if (e.key === 'Escape') {
-                    input.dataset.saved = 'true';
-                    input.value = currentTitle;
-                    save();
-                }
-            });
-            input.addEventListener('click', e => e.stopPropagation());
+    // ── Loose chats section ───────────────────────────────────────────────────
+    const loose = allChats.filter(c => !c.folderId);
+    if (loose.length > 0) {
+        const chatsLabel = document.createElement('div');
+        chatsLabel.className = 'sidebar-section-label flex justify-between items-center cursor-pointer select-none mt-2 group';
+        
+        const chatsLabelLeft = document.createElement('div');
+        chatsLabelLeft.className = 'flex items-center gap-1.5 text-white/40 group-hover:text-white/60 transition-colors';
+        
+        const chatsChevron = document.createElement('i');
+        chatsChevron.className = `ph ph-caret-right text-[10px] transition-transform duration-200 ${globalState.chatsExpanded ? 'rotate-90' : ''}`;
+        chatsLabelLeft.appendChild(chatsChevron);
 
-            titleContainer.replaceWith(input);
-            input.focus();
-            input.select();
-            btn.draggable = false;
+        const chatsLabelText = document.createElement('span');
+        chatsLabelText.textContent = 'Chats';
+        chatsLabelLeft.appendChild(chatsLabelText);
+        chatsLabel.appendChild(chatsLabelLeft);
+        
+        chatsLabel.addEventListener('click', () => {
+            globalState.chatsExpanded = !globalState.chatsExpanded;
+            updateState({ chatsExpanded: globalState.chatsExpanded });
+            renderChatList();
         });
 
-        btn.addEventListener('click', () => {
-            if (globalState.activeChatId === chat.id) return; // already active
+        chatList.appendChild(chatsLabel);
 
-            // Swap sidebar active indicator immediately (no full re-render)
-            const prev = chatList.querySelector('.chat-item.active');
-            if (prev) prev.classList.remove('active');
-            btn.classList.add('active');
+        const chatsContainer = document.createElement('div');
+        if (!globalState.chatsExpanded) chatsContainer.classList.add('hidden');
+        chatList.appendChild(chatsContainer);
 
-            globalState.activeChatId = chat.id;
-            debouncedSaveChats();
-            debouncedLoadChat(chat.id); // only render the final destination
-            if (window.innerWidth < 768) closeMobileSidebar();
-        });
+        const pinned = loose.filter(c => c.isPinned);
+        const unpinned = loose.filter(c => !c.isPinned);
+        [...pinned, ...unpinned].forEach(chat => appendChatItem(chatsContainer, chat, null));
+    }
+}
 
-        // Drag and drop events
-        btn.addEventListener('dragstart', (e) => {
-            draggedChatId = chat.id;
-            btn.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-        });
+// ── Folder row ────────────────────────────────────────────────────────────────
+function appendFolderItem(folder, allChats, container = chatList) {
+    const folderChats = allChats.filter(c => c.folderId === folder.id);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'folder-item';
+    wrapper.dataset.folderId = folder.id;
 
-        btn.addEventListener('dragend', () => {
-            draggedChatId = null;
-            btn.classList.remove('dragging');
-            document.querySelectorAll('.chat-item').forEach(item => item.classList.remove('drag-over'));
-        });
+    // Header
+    const header = document.createElement('div');
+    header.className = 'folder-header group';
+    header.innerHTML = `
+        <span class="folder-chevron text-white/30 flex-shrink-0 transition-transform duration-200 ${folder.isExpanded ? 'rotate-90' : ''} ${folderChats.length === 0 ? 'invisible' : ''}">
+            <i class="ph ph-caret-right text-xs pointer-events-none"></i>
+        </span>
+        <i class="ph-fill ph-folder${folder.isExpanded && folderChats.length > 0 ? '-open' : ''} text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none"></i>
+        <span class="folder-name-text flex-1 min-w-0 truncate">${escapeHtml(folder.name)}</span>
+        <span class="folder-count text-[10px] text-white/25 flex-shrink-0 mr-1">${folderChats.length}</span>
+        <div class="folder-actions relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <button class="folder-options-trigger flex items-center justify-center w-6 h-6 text-white/40 hover:text-white transition" title="Options">
+                <i class="ph ph-dots-three-outline-vertical text-[16px]"></i>
+            </button>
+            <div class="folder-options-menu glass-dropdown hidden shadow-2xl overflow-hidden" style="left:auto;right:0;top:calc(100% + 4px);min-width:130px;z-index:50;padding:4px;">
+                <div class="dropdown-option rename-folder text-white/80 hover:text-white mb-0.5">
+                    <i class="ph ph-pencil-simple text-sm"></i> Rename
+                </div>
+                <div class="dropdown-option delete-folder !text-red-500 hover:!text-red-400 hover:!bg-red-500/10">
+                    <i class="ph ph-trash text-sm"></i> Delete
+                </div>
+            </div>
+        </div>`;
 
-        btn.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            if (draggedChatId !== chat.id) {
-                const draggedChat = globalState.chats.find(c => c.id === draggedChatId);
-                // Restrict dragging a pinned chat to the pinned section and unpinned chat to the unpinned section
-                if (draggedChat && !!draggedChat.isPinned === !!chat.isPinned) {
-                    btn.classList.add('drag-over');
-                }
-            }
-        });
+    wrapper.appendChild(header);
+    if (folderChats.length > 0) {
+        const body = document.createElement('div');
+        body.className = 'folder-body' + (folder.isExpanded ? '' : ' hidden');
 
-        btn.addEventListener('dragleave', () => {
-            btn.classList.remove('drag-over');
-        });
+        const pinnedIn = folderChats.filter(c => c.isPinned);
+        const unpinnedIn = folderChats.filter(c => !c.isPinned);
+        [...pinnedIn, ...unpinnedIn].forEach(chat => appendChatItem(body, chat, folder.id));
+        wrapper.appendChild(body);
+    }
+    container.appendChild(wrapper);
 
-        btn.addEventListener('drop', (e) => {
-            e.preventDefault();
-            btn.classList.remove('drag-over');
+    const chevron = header.querySelector('.folder-chevron');
+    const folderIcon = header.querySelector('.ph-fill');
+    header.addEventListener('click', e => {
+        if (e.target.closest('.folder-actions')) return;
+        if (folderChats.length === 0) return; // Do not expand/collapse empty folders
+        folder.isExpanded = !folder.isExpanded;
+        const bodyEl = wrapper.querySelector('.folder-body');
+        if (bodyEl) bodyEl.classList.toggle('hidden', !folder.isExpanded);
+        chevron.classList.toggle('rotate-90', folder.isExpanded);
+        if (folderIcon) folderIcon.className = `ph-fill ph-folder${folder.isExpanded ? '-open' : ''} text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none`;
+        saveFolders();
+    });
 
-            const draggedChat = globalState.chats.find(c => c.id === draggedChatId);
-            
-            if (draggedChat && draggedChatId !== chat.id && !!draggedChat.isPinned === !!chat.isPinned) {
-                // Find source and target arrays
-                const sourceIndex = globalState.chats.findIndex(c => c.id === draggedChatId);
-                const targetIndex = globalState.chats.findIndex(c => c.id === chat.id);
+    // Drag chat onto folder header → move into folder
+    let hoverTimer = null;
+    header.addEventListener('dragover', e => {
+        if (!draggedChatId) return;
+        e.preventDefault(); e.stopPropagation();
+        header.classList.add('folder-drag-target');
+        if (!folder.isExpanded && !hoverTimer && folderChats.length > 0) {
+            hoverTimer = setTimeout(() => {
+                folder.isExpanded = true;
+                const bodyEl = wrapper.querySelector('.folder-body');
+                if (bodyEl) bodyEl.classList.remove('hidden');
+                chevron.classList.add('rotate-90');
+                if (folderIcon) folderIcon.className = 'ph-fill ph-folder-open text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none';
+                saveFolders();
+            }, 600);
+        }
+    });
+    header.addEventListener('dragleave', () => { header.classList.remove('folder-drag-target'); clearTimeout(hoverTimer); hoverTimer = null; });
+    header.addEventListener('drop', e => {
+        e.preventDefault(); e.stopPropagation();
+        header.classList.remove('folder-drag-target');
+        clearTimeout(hoverTimer); hoverTimer = null;
+        if (draggedChatId) moveChatToFolder(draggedChatId, folder.id);
+    });
 
-                if (sourceIndex !== -1 && targetIndex !== -1) {
-                    // Rearrange array
-                    const [removed] = globalState.chats.splice(sourceIndex, 1);
-                    globalState.chats.splice(targetIndex, 0, removed);
-                    saveChats();
-                    renderChatList();
-                }
-            }
-        });
+    // Options menu
+    const optionsTrigger = header.querySelector('.folder-options-trigger');
+    const optionsMenu = header.querySelector('.folder-options-menu');
+    const actionsDiv = header.querySelector('.folder-actions');
 
-        // Chat actions hover state handled by CSS .group-hover
+    optionsTrigger.addEventListener('click', e => {
+        e.stopPropagation();
+        const wasHidden = optionsMenu.classList.contains('hidden');
+        document.querySelectorAll('.folder-options-menu, .chat-options-menu').forEach(m => m.classList.add('hidden'));
+        document.querySelectorAll('.folder-actions, .chat-actions').forEach(a => a.style.opacity = '');
+        if (wasHidden) { optionsMenu.classList.remove('hidden'); actionsDiv.style.opacity = '1'; }
+    });
 
-        chatList.appendChild(btn);
+    header.querySelector('.rename-folder').addEventListener('click', e => {
+        e.stopPropagation();
+        optionsMenu.classList.add('hidden'); actionsDiv.style.opacity = '';
+        triggerFolderRename(folder, header);
+    });
+
+    header.querySelector('.delete-folder').addEventListener('click', e => {
+        e.stopPropagation();
+        optionsMenu.classList.add('hidden'); actionsDiv.style.opacity = '';
+        folderToDeleteId = folder.id;
+        if (deleteFolderChatsCheckbox) deleteFolderChatsCheckbox.checked = false;
+        if (deleteFolderConfirmModal) deleteFolderConfirmModal.classList.remove('hidden');
     });
 }
+
+// ── Chat row ──────────────────────────────────────────────────────────────────
+function appendChatItem(container, chat, currentFolderId = null) {
+    const btn = document.createElement('button');
+    btn.className = 'chat-item group' + (chat.id === globalState.activeChatId ? ' active' : '') + (currentFolderId ? ' chat-item-indented' : '');
+    btn.draggable = true;
+
+    const isThisChatGenerating = isGenerating && chat.id === generatingChatId;
+    let iconClass;
+    if (isThisChatGenerating) {
+        iconClass = 'ph ph-spinner animate-spin text-indigo-400 opacity-80';
+    } else if (!currentFolderId && chat.isPinned) {
+        iconClass = 'ph-fill ph-push-pin text-indigo-400 opacity-80';
+    } else {
+        iconClass = 'ph ph-chat-teardrop';
+    }
+
+    // Build folder-specific menu items
+    const hasFolders = globalState.folders && globalState.folders.length > 0;
+    let folderMenuHtml = '';
+    if (currentFolderId) {
+        folderMenuHtml = `<div class="dropdown-option remove-from-folder text-white/80 hover:text-white mb-0.5"><i class="ph ph-folder-minus text-sm"></i> Remove from Folder</div>`;
+    } else if (hasFolders) {
+        folderMenuHtml = `
+            <div class="dropdown-option move-to-folder text-white/80 hover:text-white mb-0.5 flex justify-between items-center w-full">
+                <div class="flex items-center gap-2 pointer-events-none">
+                    <i class="ph ph-folder-plus text-sm flex-shrink-0"></i> <span>Move</span>
+                </div>
+                <i class="ph ph-caret-right text-[10px] text-white/30 flex-shrink-0 pointer-events-none"></i>
+            </div>`;
+    }
+
+    btn.innerHTML = `
+        <div class="flex items-center gap-2 min-w-0 flex-1 pointer-events-none">
+            <i class="${iconClass} text-sm flex-shrink-0"></i>
+            <span class="truncate chat-title-text">${escapeHtml(chat.title)}</span>
+        </div>
+        <div class="chat-actions relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <button class="options-trigger flex-shrink-0 flex items-center justify-center w-6 h-6 text-white/40 hover:text-white transition" title="Options">
+                <i class="ph ph-dots-three-outline-vertical text-[18px]"></i>
+            </button>
+            <div class="chat-options-menu glass-dropdown hidden shadow-2xl overflow-visible" style="left:auto;right:0;top:calc(100% + 4px);min-width:145px;z-index:50;padding:4px;">
+                ${!currentFolderId ? `<div class="dropdown-option pin-chat text-white/80 hover:text-white mb-0.5"><i class="ph ${chat.isPinned ? 'ph-push-pin-slash' : 'ph-push-pin'} text-sm"></i> ${chat.isPinned ? 'Unpin' : 'Pin'}</div>` : ''}
+                <div class="dropdown-option rename-chat text-white/80 hover:text-white mb-0.5"><i class="ph ph-pencil-simple text-sm"></i> Rename</div>
+                ${folderMenuHtml}
+                <div class="dropdown-option export-chat text-white/80 hover:text-white mb-0.5"><i class="ph ph-export text-sm"></i> Export</div>
+                <div class="dropdown-option delete-chat !text-red-500 hover:!text-red-400 hover:!bg-red-500/10"><i class="ph ph-trash text-sm"></i> Delete</div>
+            </div>
+        </div>`;
+
+    const optionsTrigger = btn.querySelector('.options-trigger');
+    const optionsMenu = btn.querySelector('.chat-options-menu');
+    const actionsDiv = btn.querySelector('.chat-actions');
+
+    optionsTrigger.addEventListener('click', e => {
+        e.stopPropagation();
+        const wasHidden = optionsMenu.classList.contains('hidden');
+        document.querySelectorAll('.chat-options-menu, .folder-options-menu').forEach(m => m.classList.add('hidden'));
+        document.querySelectorAll('.chat-actions, .folder-actions').forEach(a => a.style.opacity = '');
+        document.querySelectorAll('.chat-item').forEach(b => { if (!b.querySelector('input')) b.draggable = true; });
+        if (wasHidden) { optionsMenu.classList.remove('hidden'); actionsDiv.style.opacity = '1'; btn.draggable = false; }
+    });
+
+    btn.querySelector('.delete-chat').addEventListener('click', e => {
+        e.stopPropagation();
+        optionsMenu.classList.add('hidden'); actionsDiv.style.opacity = '';
+        chatToDeleteId = chat.id;
+        deleteChatConfirmModal.classList.remove('hidden');
+    });
+
+    btn.querySelector('.export-chat').addEventListener('click', e => {
+        e.stopPropagation();
+        optionsMenu.classList.add('hidden'); actionsDiv.style.opacity = '';
+        exportChat(chat.id);
+    });
+
+    const pinBtn = btn.querySelector('.pin-chat');
+    if (pinBtn) {
+        pinBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            optionsMenu.classList.add('hidden'); actionsDiv.style.opacity = '';
+            chat.isPinned = !chat.isPinned;
+            saveChats(); renderChatList();
+        });
+    }
+
+    // Move to folder sub-menu
+    const moveToFolderBtn = btn.querySelector('.move-to-folder');
+    if (moveToFolderBtn) {
+        let hoverTimeout;
+        let activeSubmenu = null;
+
+        const closeSubmenu = () => {
+            if (activeSubmenu) {
+                activeSubmenu.remove();
+                activeSubmenu = null;
+            }
+        };
+
+        const openSubmenu = () => {
+            if (activeSubmenu) return;
+            document.querySelectorAll('.folder-picker-submenu').forEach(m => m.remove());
+
+            activeSubmenu = document.createElement('div');
+            activeSubmenu.className = 'folder-picker-submenu glass-dropdown shadow-2xl flex flex-col cursor-default';
+            activeSubmenu.style.cssText = 'position:fixed; z-index:200; min-width:160px; padding:4px;';
+            
+            const folders = globalState.folders || [];
+            folders.forEach(f => {
+                const opt = document.createElement('div');
+                opt.className = 'dropdown-option text-white/80 hover:text-white mb-0.5';
+                opt.innerHTML = `<i class="ph-fill ph-folder text-indigo-400/70 text-sm pointer-events-none"></i> <span class="pointer-events-none truncate flex-1">${escapeHtml(f.name)}</span>`;
+                opt.addEventListener('click', e => { 
+                    e.stopPropagation(); 
+                    closeSubmenu();
+                    optionsMenu.classList.add('hidden'); 
+                    actionsDiv.style.opacity = '';
+                    moveChatToFolder(chat.id, f.id); 
+                });
+                activeSubmenu.appendChild(opt);
+            });
+
+            document.body.appendChild(activeSubmenu);
+
+            const rect = moveToFolderBtn.getBoundingClientRect();
+            activeSubmenu.style.top = rect.top + 'px';
+            activeSubmenu.style.left = (rect.right + 2) + 'px';
+
+            activeSubmenu.addEventListener('mouseenter', () => clearTimeout(hoverTimeout));
+            activeSubmenu.addEventListener('mouseleave', () => {
+                hoverTimeout = setTimeout(closeSubmenu, 150);
+            });
+        };
+
+        moveToFolderBtn.addEventListener('mouseenter', () => {
+            clearTimeout(hoverTimeout);
+            openSubmenu();
+        });
+        
+        moveToFolderBtn.addEventListener('mouseleave', () => {
+            hoverTimeout = setTimeout(closeSubmenu, 150);
+        });
+
+        // Ensure submenu closes if the main options menu is closed externally
+        const closeMain = e => { 
+            if (!optionsMenu.contains(e.target) && !optionsTrigger.contains(e.target)) {
+                closeSubmenu();
+            }
+        };
+        document.addEventListener('click', closeMain, true);
+    }
+
+    const removeFromFolderBtn = btn.querySelector('.remove-from-folder');
+    if (removeFromFolderBtn) {
+        removeFromFolderBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            optionsMenu.classList.add('hidden'); actionsDiv.style.opacity = '';
+            moveChatToFolder(chat.id, null);
+        });
+    }
+
+    btn.querySelector('.rename-chat').addEventListener('click', e => {
+        e.stopPropagation();
+        optionsMenu.classList.add('hidden'); actionsDiv.style.opacity = '';
+        const titleContainer = btn.querySelector('.chat-title-text');
+        const currentTitle = chat.title;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentTitle;
+        input.className = 'w-full bg-black/20 text-white/90 text-[13px] px-1 py-0.5 rounded border border-white/20 focus:outline-none focus:border-indigo-400 pointer-events-auto';
+        actionsDiv.style.display = 'none';
+        const save = () => {
+            const newTitle = input.value.trim();
+            if (input.dataset.saved) return;
+            input.dataset.saved = 'true';
+            if (newTitle && newTitle !== currentTitle) { chat.title = newTitle; saveChats(); }
+            renderChatList();
+        };
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', e => {
+            e.stopPropagation();
+            if (e.key === 'Enter') save();
+            if (e.key === 'Escape') { input.dataset.saved = 'true'; input.value = currentTitle; save(); }
+        });
+        input.addEventListener('click', e => e.stopPropagation());
+        titleContainer.replaceWith(input);
+        input.focus(); input.select();
+        btn.draggable = false;
+    });
+
+    btn.addEventListener('click', () => {
+        if (globalState.activeChatId === chat.id) return;
+        const prev = chatList.querySelector('.chat-item.active');
+        if (prev) prev.classList.remove('active');
+        btn.classList.add('active');
+        globalState.activeChatId = chat.id;
+        debouncedSaveChats();
+        debouncedLoadChat(chat.id);
+        if (window.innerWidth < 768) closeMobileSidebar();
+    });
+
+    // Drag to reorder
+    btn.addEventListener('dragstart', e => { draggedChatId = chat.id; btn.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    btn.addEventListener('dragend', () => { draggedChatId = null; btn.classList.remove('dragging'); document.querySelectorAll('.chat-item').forEach(i => i.classList.remove('drag-over')); });
+
+    btn.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (draggedChatId !== chat.id) {
+            const dragged = globalState.chats.find(c => c.id === draggedChatId);
+            // Only allow reorder within the same group (same folderId)
+            if (dragged && dragged.folderId === (currentFolderId || null)) {
+                btn.classList.add('drag-over');
+            }
+        }
+    });
+    btn.addEventListener('dragleave', () => btn.classList.remove('drag-over'));
+    btn.addEventListener('drop', e => {
+        e.preventDefault();
+        btn.classList.remove('drag-over');
+        const dragged = globalState.chats.find(c => c.id === draggedChatId);
+        if (dragged && draggedChatId !== chat.id && dragged.folderId === (currentFolderId || null)) {
+            const si = globalState.chats.findIndex(c => c.id === draggedChatId);
+            const ti = globalState.chats.findIndex(c => c.id === chat.id);
+            if (si !== -1 && ti !== -1) {
+                const [rem] = globalState.chats.splice(si, 1);
+                globalState.chats.splice(ti, 0, rem);
+                saveChats(); renderChatList();
+            }
+        }
+    });
+
+    container.appendChild(btn);
+}
+
+
+
+
 
 function deleteChat(id) {
     globalState.chats = globalState.chats.filter(c => c.id !== id);
@@ -2250,11 +2601,11 @@ async function sendMessage() {
 
     // Re-render conversation
     loadChat(globalState.activeChatId);
-    renderChatList();
 
     // Switch UI into generating state
     isGenerating = true;
     generatingChatId = globalState.activeChatId;
+    renderChatList();
     sendBtn.classList.add('hidden');
     stopBtn.classList.remove('hidden');
     typingIndicator.classList.remove('hidden');
@@ -2334,6 +2685,12 @@ async function sendMessage() {
     }
 
     if (ws && ws.readyState === WebSocket.OPEN) {
+        fetch('/api/state').then(res => res.json())
+        .then(data => {
+            globalState = data;
+            globalState.folders = globalState.folders || [];
+            updateUIWithState();
+        });
         ws.send(JSON.stringify({
             type: 'start',
             engine: globalState.engine,
@@ -2395,4 +2752,7 @@ function finalizeGeneration() {
     aiMessageBuffer = '';
     aiMessageEl = null;
     generatingChatId = null;
+    
+    // Always update sidebar at the end to clear any loading states
+    renderChatList();
 }

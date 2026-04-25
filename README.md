@@ -132,21 +132,20 @@ http://YOUR_LOCAL_IP:4000
 ```
 starbox-ui/
 ├── public/
-│   ├── index.html          # Main UI shell
-│   ├── app.js              # Frontend logic (WebSocket, chat, state)
-│   ├── styles.css          # Global styles & glassmorphism theme
-│   ├── input.css           # Tailwind CSS entry point
-│   ├── output.css          # Compiled Tailwind CSS (auto-generated)
-│   └── local-vendor/       # Locally bundled JS/CSS libraries (offline support)
+│   ├── index.html
+│   ├── app.js
+│   ├── styles.css
+│   ├── input.css
+│   ├── output.css
+│   └── local-vendor/
 │       ├── highlight.js/
 │       └── marked/
 ├── data/
-│   └── state.json          # Persisted server-side state (chats, settings)
-├── uploads/                # Temporary file upload storage
-├── server.js               # Express + WebSocket backend
+│   └── state.json
+├── uploads/
+├── server.js
 ├── package.json
 ├── tailwind.config.js
-├── LICENSE
 └── README.md
 ```
 
