@@ -385,6 +385,19 @@ body {
 }
 .msg-action-btn:active { transform: scale(0.92); }
 
+/* ── Message timestamp (shown on hover, above each bubble) ───────── */
+.msg-timestamp {
+    display: block;
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.22);
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+    margin-bottom: 2px;
+    padding: 0 2px;
+    user-select: none;
+}
+
 /* Avatar */
 .avatar-user {
     width: 28px; height: 28px;
@@ -916,10 +929,21 @@ body {
     box-shadow: 0 0 0 1px rgba(99,102,241,0.25) inset;
 }
 
+/* Drag-over highlight on the Chats section label */
+.sidebar-section-label.chats-section-drag-target {
+    background: rgba(99,102,241,0.1);
+    border-radius: 8px;
+    color: rgba(165,180,252,0.85);
+    outline: 1px dashed rgba(99,102,241,0.4);
+    outline-offset: -2px;
+}
+
 /* Folder body (indented chat list) */
 .folder-body {
-    padding-left: 14px;
+    padding-left: 8px;
     padding-bottom: 2px;
+    margin-left: 14px;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* Indented chat items inside a folder */

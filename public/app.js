@@ -1376,38 +1376,80 @@ function renderChatList() {
 
     // ── Loose chats section ───────────────────────────────────────────────────
     const loose = allChats.filter(c => !c.folderId);
+
+    // Always render the Chats section header so it can act as a drop zone
+    // even when there are no loose chats yet (or when it is collapsed).
+    const chatsLabel = document.createElement('div');
+    chatsLabel.className = 'sidebar-section-label flex justify-between items-center cursor-pointer select-none mt-2 group';
+
+    const chatsLabelLeft = document.createElement('div');
+    chatsLabelLeft.className = 'flex items-center gap-1.5 text-white/40 group-hover:text-white/60 transition-colors';
+
+    const chatsChevron = document.createElement('i');
+    chatsChevron.className = `ph ph-caret-right text-[10px] transition-transform duration-200 ${globalState.chatsExpanded ? 'rotate-90' : ''}`;
+    chatsLabelLeft.appendChild(chatsChevron);
+
+    const chatsLabelText = document.createElement('span');
+    chatsLabelText.textContent = 'Chats';
+    chatsLabelLeft.appendChild(chatsLabelText);
+    chatsLabel.appendChild(chatsLabelLeft);
+
+    chatsLabel.addEventListener('click', () => {
+        globalState.chatsExpanded = !globalState.chatsExpanded;
+        updateState({ chatsExpanded: globalState.chatsExpanded });
+        renderChatList();
+    });
+
+    chatList.appendChild(chatsLabel);
+
+    const chatsContainer = document.createElement('div');
+    if (!globalState.chatsExpanded) chatsContainer.classList.add('hidden');
+    chatList.appendChild(chatsContainer);
+
     if (loose.length > 0) {
-        const chatsLabel = document.createElement('div');
-        chatsLabel.className = 'sidebar-section-label flex justify-between items-center cursor-pointer select-none mt-2 group';
-        
-        const chatsLabelLeft = document.createElement('div');
-        chatsLabelLeft.className = 'flex items-center gap-1.5 text-white/40 group-hover:text-white/60 transition-colors';
-        
-        const chatsChevron = document.createElement('i');
-        chatsChevron.className = `ph ph-caret-right text-[10px] transition-transform duration-200 ${globalState.chatsExpanded ? 'rotate-90' : ''}`;
-        chatsLabelLeft.appendChild(chatsChevron);
-
-        const chatsLabelText = document.createElement('span');
-        chatsLabelText.textContent = 'Chats';
-        chatsLabelLeft.appendChild(chatsLabelText);
-        chatsLabel.appendChild(chatsLabelLeft);
-        
-        chatsLabel.addEventListener('click', () => {
-            globalState.chatsExpanded = !globalState.chatsExpanded;
-            updateState({ chatsExpanded: globalState.chatsExpanded });
-            renderChatList();
-        });
-
-        chatList.appendChild(chatsLabel);
-
-        const chatsContainer = document.createElement('div');
-        if (!globalState.chatsExpanded) chatsContainer.classList.add('hidden');
-        chatList.appendChild(chatsContainer);
-
         const pinned = loose.filter(c => c.isPinned);
         const unpinned = loose.filter(c => !c.isPinned);
         [...pinned, ...unpinned].forEach(chat => appendChatItem(chatsContainer, chat, null));
     }
+
+    // ── Chats section label as a drag-drop target ─────────────────────────────
+    // Allows dragging a folder-chat directly onto the "Chats" header to remove
+    // it from its folder, even when the Chats section is collapsed.
+    let chatsLabelHoverTimer = null;
+    chatsLabel.addEventListener('dragover', e => {
+        if (!draggedChatId) return;
+        const dragged = globalState.chats.find(c => c.id === draggedChatId);
+        // Only react when dragging a chat that IS inside a folder
+        if (!dragged || !dragged.folderId) return;
+        e.preventDefault(); e.stopPropagation();
+        chatsLabel.classList.add('chats-section-drag-target');
+        // Auto-expand the section after hovering for 600 ms (mirrors folder behaviour)
+        if (!globalState.chatsExpanded && !chatsLabelHoverTimer) {
+            chatsLabelHoverTimer = setTimeout(() => {
+                globalState.chatsExpanded = true;
+                chatsContainer.classList.remove('hidden');
+                chatsChevron.classList.add('rotate-90');
+                updateState({ chatsExpanded: true });
+            }, 600);
+        }
+    });
+    chatsLabel.addEventListener('dragleave', () => {
+        chatsLabel.classList.remove('chats-section-drag-target');
+        clearTimeout(chatsLabelHoverTimer); chatsLabelHoverTimer = null;
+    });
+    chatsLabel.addEventListener('drop', e => {
+        e.preventDefault(); e.stopPropagation();
+        chatsLabel.classList.remove('chats-section-drag-target');
+        clearTimeout(chatsLabelHoverTimer); chatsLabelHoverTimer = null;
+        if (!draggedChatId) return;
+        const dragged = globalState.chats.find(c => c.id === draggedChatId);
+        if (!dragged || !dragged.folderId) return;
+        // Persist expanded state to the server so the WebSocket echo doesn't
+        // revert it back to closed after the state broadcast.
+        globalState.chatsExpanded = true;
+        updateState({ chatsExpanded: true });
+        moveChatToFolder(dragged.id, null); // clears folderId
+    });
 }
 
 // ── Folder row ────────────────────────────────────────────────────────────────
@@ -1424,7 +1466,7 @@ function appendFolderItem(folder, allChats, container = chatList) {
         <span class="folder-chevron text-white/30 flex-shrink-0 transition-transform duration-200 ${folder.isExpanded ? 'rotate-90' : ''} ${folderChats.length === 0 ? 'invisible' : ''}">
             <i class="ph ph-caret-right text-xs pointer-events-none"></i>
         </span>
-        <i class="ph-fill ph-folder${folder.isExpanded && folderChats.length > 0 ? '-open' : ''} text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none"></i>
+        <i class="ph ph-folder${folder.isExpanded && folderChats.length > 0 ? '-open' : ''} text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none"></i>
         <span class="folder-name-text flex-1 min-w-0 truncate">${escapeHtml(folder.name)}</span>
         <span class="folder-count text-[10px] text-white/25 flex-shrink-0 mr-1">${folderChats.length}</span>
         <div class="folder-actions relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1454,7 +1496,7 @@ function appendFolderItem(folder, allChats, container = chatList) {
     container.appendChild(wrapper);
 
     const chevron = header.querySelector('.folder-chevron');
-    const folderIcon = header.querySelector('.ph-fill');
+    const folderIcon = header.querySelector('i[class*="ph-folder"]');
     header.addEventListener('click', e => {
         if (e.target.closest('.folder-actions')) return;
         if (folderChats.length === 0) return; // Do not expand/collapse empty folders
@@ -1462,7 +1504,7 @@ function appendFolderItem(folder, allChats, container = chatList) {
         const bodyEl = wrapper.querySelector('.folder-body');
         if (bodyEl) bodyEl.classList.toggle('hidden', !folder.isExpanded);
         chevron.classList.toggle('rotate-90', folder.isExpanded);
-        if (folderIcon) folderIcon.className = `ph-fill ph-folder${folder.isExpanded ? '-open' : ''} text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none`;
+        if (folderIcon) folderIcon.className = `ph ph-folder${folder.isExpanded ? '-open' : ''} text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none`;
         saveFolders();
     });
 
@@ -1478,7 +1520,7 @@ function appendFolderItem(folder, allChats, container = chatList) {
                 const bodyEl = wrapper.querySelector('.folder-body');
                 if (bodyEl) bodyEl.classList.remove('hidden');
                 chevron.classList.add('rotate-90');
-                if (folderIcon) folderIcon.className = 'ph-fill ph-folder-open text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none';
+                if (folderIcon) folderIcon.className = 'ph ph-folder-open text-indigo-400/70 text-sm flex-shrink-0 pointer-events-none';
                 saveFolders();
             }, 600);
         }
@@ -1530,16 +1572,16 @@ function appendChatItem(container, chat, currentFolderId = null) {
     if (isThisChatGenerating) {
         iconClass = 'ph ph-spinner animate-spin text-indigo-400 opacity-80';
     } else if (!currentFolderId && chat.isPinned) {
-        iconClass = 'ph-fill ph-push-pin text-indigo-400 opacity-80';
+        iconClass = 'ph ph-push-pin text-indigo-400 opacity-80';
     } else {
-        iconClass = 'ph ph-chat-teardrop';
+        iconClass = 'ph ph-chat-teardrop text-indigo-400/70';
     }
 
     // Build folder-specific menu items
     const hasFolders = globalState.folders && globalState.folders.length > 0;
     let folderMenuHtml = '';
     if (currentFolderId) {
-        folderMenuHtml = `<div class="dropdown-option remove-from-folder text-white/80 hover:text-white mb-0.5"><i class="ph ph-folder-minus text-sm"></i> Remove from Folder</div>`;
+        folderMenuHtml = `<div class="dropdown-option remove-from-folder text-white/80 hover:text-white mb-0.5"><i class="ph ph-folder-minus text-sm"></i> Move to Chats</div>`;
     } else if (hasFolders) {
         folderMenuHtml = `
             <div class="dropdown-option move-to-folder text-white/80 hover:text-white mb-0.5 flex justify-between items-center w-full">
@@ -1629,7 +1671,7 @@ function appendChatItem(container, chat, currentFolderId = null) {
             folders.forEach(f => {
                 const opt = document.createElement('div');
                 opt.className = 'dropdown-option text-white/80 hover:text-white mb-0.5';
-                opt.innerHTML = `<i class="ph-fill ph-folder text-indigo-400/70 text-sm pointer-events-none"></i> <span class="pointer-events-none truncate flex-1">${escapeHtml(f.name)}</span>`;
+                opt.innerHTML = `<i class="ph ph-folder text-indigo-400/70 text-sm pointer-events-none"></i> <span class="pointer-events-none truncate flex-1">${escapeHtml(f.name)}</span>`;
                 opt.addEventListener('click', e => { 
                     e.stopPropagation(); 
                     closeSubmenu();
@@ -1727,11 +1769,7 @@ function appendChatItem(container, chat, currentFolderId = null) {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         if (draggedChatId !== chat.id) {
-            const dragged = globalState.chats.find(c => c.id === draggedChatId);
-            // Only allow reorder within the same group (same folderId)
-            if (dragged && dragged.folderId === (currentFolderId || null)) {
-                btn.classList.add('drag-over');
-            }
+            btn.classList.add('drag-over');
         }
     });
     btn.addEventListener('dragleave', () => btn.classList.remove('drag-over'));
@@ -1739,10 +1777,13 @@ function appendChatItem(container, chat, currentFolderId = null) {
         e.preventDefault();
         btn.classList.remove('drag-over');
         const dragged = globalState.chats.find(c => c.id === draggedChatId);
-        if (dragged && draggedChatId !== chat.id && dragged.folderId === (currentFolderId || null)) {
+        if (dragged && draggedChatId !== chat.id) {
             const si = globalState.chats.findIndex(c => c.id === draggedChatId);
             const ti = globalState.chats.findIndex(c => c.id === chat.id);
             if (si !== -1 && ti !== -1) {
+                // Move the dragged chat into the same group as the drop target
+                dragged.folderId = currentFolderId || null;
+                if (dragged.folderId !== null) dragged.isPinned = false; // unpin when entering a folder
                 const [rem] = globalState.chats.splice(si, 1);
                 globalState.chats.splice(ti, 0, rem);
                 saveChats(); renderChatList();
@@ -1918,7 +1959,7 @@ function renderMessageBatch(chat, startIdx, endIdx) {
             const wrap = renderThinkingBlock(false, msg.thinkingDurationMs || 0);
             updateThinkingBlock(wrap, msg.thinkingProcess);
         }
-        renderMessage(msg.role, msg.content, idx, null, msg.images);
+        renderMessage(msg.role, msg.content, idx, null, msg.images, msg.timestamp);
     }
 }
 
@@ -1983,7 +2024,7 @@ function prependLoadMoreButton(chat, chatId) {
                 fragment.appendChild(thinkWrapper);
             }
             // Render message into a temp container, then move it to the fragment
-            renderMessage(msg.role, msg.content, idx, tempContainer, msg.images);
+            renderMessage(msg.role, msg.content, idx, tempContainer, msg.images, msg.timestamp);
             if (tempContainer.lastElementChild) {
                 fragment.appendChild(tempContainer.lastElementChild);
             }
@@ -2076,7 +2117,21 @@ function renderAIText(content, element) {
 }
 
 // ── Render a message bubble ───────────────────────────────────────────────────
-function renderMessage(role, content, index = null, targetContainer = null, images = []) {
+function formatMsgTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const h = d.getHours(), m = d.getMinutes();
+    const hh = h % 12 || 12;
+    const mm = String(m).padStart(2, '0');
+    const ampm = h < 12 ? 'AM' : 'PM';
+    if (isToday) return `Today ${hh}:${mm} ${ampm}`;
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${months[d.getMonth()]} ${d.getDate()}, ${hh}:${mm} ${ampm}`;
+}
+
+function renderMessage(role, content, index = null, targetContainer = null, images = [], timestamp = null) {
     const container = targetContainer || messagesContainer;
     const wrapper = document.createElement('div');
     wrapper.className = 'w-full message-animate';
@@ -2096,11 +2151,14 @@ function renderMessage(role, content, index = null, targetContainer = null, imag
         wrapper.innerHTML = `
             <div class="flex justify-end items-start gap-2.5 group">
                 <div class="flex flex-col items-end gap-1 max-w-[85%]">
-                    <div class="user-bubble">
-                        ${imagesHtml}
-                        <div class="text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(content)}</div>
+                    <div class="relative">
+                        ${timestamp ? `<div class="msg-timestamp opacity-0 group-hover:opacity-100 transition-opacity" style="position:absolute;bottom:100%;right:0;margin-bottom:4px;">${formatMsgTime(timestamp)}</div>` : ''}
+                        <div class="user-bubble">
+                            ${imagesHtml}
+                            <div class="text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(content)}</div>
+                        </div>
                     </div>
-                    <div class="flex flex-row gap-2 opacity-0 group-hover:opacity-100 transition-opacity pr-1">
+                    <div class="flex flex-row items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity pr-1">
                         ${index !== null ? `
                         <button class="msg-action-btn edit-msg-btn" title="Edit message">
                             <i class="ph ph-pencil-simple"></i>
@@ -2121,9 +2179,12 @@ function renderMessage(role, content, index = null, targetContainer = null, imag
         wrapper.innerHTML = `
             <div class="flex items-start gap-2.5 group">
                 <div class="avatar-ai mt-0.5"><div class="w-4 h-4 bg-current" style="-webkit-mask: url('logo.svg') center/contain no-repeat; mask: url('logo.svg') center/contain no-repeat;"></div></div>
-                <div class="flex flex-col items-start gap-1 w-full overflow-hidden">
-                    <div class="ai-bubble markdown-body content-inner w-full"></div>
-                    <div class="flex flex-row gap-2 opacity-0 group-hover:opacity-100 transition-opacity pl-1">
+                <div class="flex flex-col items-start gap-1 w-full min-w-0">
+                    <div class="relative w-full">
+                        ${timestamp ? `<div class="msg-timestamp opacity-0 group-hover:opacity-100 transition-opacity" style="position:absolute;bottom:100%;left:0;margin-bottom:4px;">${formatMsgTime(timestamp)}</div>` : ''}
+                        <div class="ai-bubble markdown-body content-inner w-full overflow-hidden"></div>
+                    </div>
+                    <div class="flex flex-row items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity pl-1">
                         <button class="msg-action-btn copy-msg-btn" title="Copy response">
                             <i class="ph ph-copy"></i>
                         </button>
@@ -2588,7 +2649,7 @@ async function sendMessage() {
     const fullPrompt = rawText + fileContext;
     const chat = globalState.chats.find(c => c.id === globalState.activeChatId);
 
-    const userMsg = { role: 'user', content: fullPrompt, rawText };
+    const userMsg = { role: 'user', content: fullPrompt, rawText, timestamp: Date.now() };
     if (attachedImages.length > 0) userMsg.images = attachedImages;
     chat.messages.push(userMsg);
 
@@ -2736,7 +2797,7 @@ function finalizeGeneration() {
     if (aiMessageBuffer) {
         const chat = globalState.chats.find(c => c.id === generatingChatId);
         if (chat) {
-            const newMsg = { role: 'ai', content: aiMessageBuffer };
+            const newMsg = { role: 'ai', content: aiMessageBuffer, timestamp: Date.now() };
             if (savedThinking) {
                 newMsg.thinkingProcess = savedThinking;
                 if (finalThinkingDuration > 0) newMsg.thinkingDurationMs = finalThinkingDuration;
@@ -2746,6 +2807,20 @@ function finalizeGeneration() {
             delete chatDOMCache[generatingChatId]; // invalidate cache
             saveChats();
             renderChatList();
+
+            // Inject the timestamp directly into the live streamed bubble.
+            // aiMessageEl (.content-inner) was created without a timestamp because
+            // the response wasn't done yet — patch it in now while the ref is still valid.
+            if (aiMessageEl) {
+                const relativeWrapper = aiMessageEl.closest('.relative');
+                if (relativeWrapper && !relativeWrapper.querySelector('.msg-timestamp')) {
+                    const tsEl = document.createElement('div');
+                    tsEl.className = 'msg-timestamp opacity-0 group-hover:opacity-100 transition-opacity';
+                    tsEl.style.cssText = 'position:absolute;bottom:100%;left:0;margin-bottom:4px;';
+                    tsEl.textContent = formatMsgTime(newMsg.timestamp);
+                    relativeWrapper.insertBefore(tsEl, relativeWrapper.firstChild);
+                }
+            }
         }
     }
 
